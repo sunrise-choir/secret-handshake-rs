@@ -1,0 +1,7 @@
+[package]
+name = "secret_handshake"
+version = "0.1.0"
+authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
+
+[dependencies]
+sodiumoxide = "0.0.15"
