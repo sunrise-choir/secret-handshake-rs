@@ -25,7 +25,7 @@ pub fn create_client_challenge(app_key: &auth::Key,
 
     unsafe {
         copy_nonoverlapping(client_app_hmac_ptr, ret_ptr as *mut [u8; 32], 1);
-        copy_nonoverlapping(client_eph_pub_ptr, ret_ptr.offset(32) as *mut [u8; 32], 1);
+        copy_nonoverlapping(client_eph_pub_ptr, (ret_ptr as *mut [u8; 32]).offset(1), 1);
     }
 
     return ret;
