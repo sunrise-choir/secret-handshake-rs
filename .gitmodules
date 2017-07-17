@@ -1,0 +1,3 @@
+[submodule "shs1-c"]
+	path = shs1-c
+	url = https://github.com/AljoschaMeyer/shs1-c

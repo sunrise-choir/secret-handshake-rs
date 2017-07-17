@@ -1,94 +1,181 @@
-//! This module provides the raw crypto operations performed in the handshake. You probably do not need to use this directly, but can use the higher-level api instead.
-
-use std::ptr::copy_nonoverlapping;
-
-use sodiumoxide::crypto::auth;
-// use sodiumoxide::crypto::sign::ed25519;
+//! Low-level bindings to shs1-c. You probably don't need to use this
+//! module directly.
 use sodiumoxide::crypto::box_;
+use sodiumoxide::crypto::hash::sha256;
+use sodiumoxide::crypto::sign;
+use sodiumoxide::crypto::scalarmult;
+use sodiumoxide::crypto::secretbox;
+use sodiumoxide::crypto::auth;
 
-/// In the first phase of the handshake, the client sends a challenge to the server. This challenge
-/// consists of the HMAC-SHA-512-256 of an ephemeral public key using the appkey as the hmac key,
-/// and of the ephemeral public key itself. While it is returned as a simple `[u8; 64]`,
-/// conceptually its type is `(auth::Tag, box_::PublicKey)`.
-pub fn create_client_challenge(app_key: &auth::Key,
-                               client_eph_pub_key: &box_::PublicKey)
-                               -> [u8; 64] {
-    let mut ret = [0u8; 64];
+use std::mem::uninitialized;
 
-    let auth::Tag(client_app_hmac) = auth::authenticate(&client_eph_pub_key[..], app_key);
-    let &box_::PublicKey(client_eph_pub) = client_eph_pub_key;
+pub const CLIENT_CHALLENGE_BYTES: usize = 64;
+pub const SERVER_CHALLENGE_BYTES: usize = 64;
+pub const CLIENT_AUTH_BYTES: usize = 112;
+pub const SERVER_ACK_BYTES: usize = 80;
 
-    let client_app_hmac_ptr: *const [u8; 32] = &client_app_hmac;
-    let client_eph_pub_ptr: *const [u8; 32] = &client_eph_pub;
+/// The data resulting from a handshake: Keys and nonces suitable for encrypted
+/// two-way communication with the peer via box-stream-rs.
+#[repr(C)]
+#[derive(Debug)]
+pub struct Outcome {
+    encryption_key: [u8; secretbox::KEYBYTES],
+    encryption_nonce: [u8; secretbox::NONCEBYTES],
+    padding_encryption: [u8; 8],
+    decryption_key: [u8; secretbox::KEYBYTES],
+    decryption_nonce: [u8; secretbox::NONCEBYTES],
+    padding_decryption: [u8; 8],
+}
 
-    let ret_ptr: *mut [u8; 64] = &mut ret;
+/// The struct used in the C code to perform the client side of a handshake.
+#[repr(C)]
+// #[derive(Debug)]
+pub struct Client {
+    // inputs
+    app: *const [u8; auth::KEYBYTES],
+    pub_: *const [u8; sign::PUBLICKEYBYTES],
+    sec: *const [u8; sign::SECRETKEYBYTES],
+    eph_pub: *const [u8; box_::PUBLICKEYBYTES],
+    eph_sec: *const [u8; box_::SECRETKEYBYTES],
+    server_pub: *const [u8; sign::PUBLICKEYBYTES],
+    // intermediate results
+    shared_secret: [u8; scalarmult::GROUPELEMENTBYTES],
+    server_lterm_shared: [u8; scalarmult::GROUPELEMENTBYTES],
+    hello: [u8; sign::SIGNATUREBYTES + sign::PUBLICKEYBYTES],
+    shared_hash: [u8; sha256::DIGESTBYTES],
+    server_eph_pub: [u8; box_::PUBLICKEYBYTES],
+}
 
-    unsafe {
-        copy_nonoverlapping(client_app_hmac_ptr, ret_ptr as *mut [u8; 32], 1);
-        copy_nonoverlapping(client_eph_pub_ptr, (ret_ptr as *mut [u8; 32]).offset(1), 1);
+impl Client {
+    pub fn new(app: *const [u8; auth::KEYBYTES],
+               pub_: *const [u8; sign::PUBLICKEYBYTES],
+               sec: *const [u8; sign::SECRETKEYBYTES],
+               eph_pub: *const [u8; box_::PUBLICKEYBYTES],
+               eph_sec: *const [u8; box_::SECRETKEYBYTES],
+               server_pub: *const [u8; sign::PUBLICKEYBYTES])
+               -> Client {
+        Client {
+            app,
+            pub_,
+            sec,
+            eph_pub,
+            eph_sec,
+            server_pub,
+            shared_secret: unsafe { uninitialized() },
+            server_lterm_shared: unsafe { uninitialized() },
+            hello: unsafe { uninitialized() },
+            shared_hash: unsafe { uninitialized() },
+            server_eph_pub: unsafe { uninitialized() },
+        }
     }
 
-    return ret;
+    pub fn create_client_challenge(&mut self, challenge: &mut [u8; CLIENT_CHALLENGE_BYTES]) {
+        unsafe { shs1_create_client_challenge(challenge, self) }
+    }
+
+    pub fn verify_server_challenge(&mut self, challenge: &[u8; CLIENT_CHALLENGE_BYTES]) -> bool {
+        unsafe { shs1_verify_server_challenge(challenge, self) }
+    }
+
+    pub fn create_client_auth(&mut self, auth: &mut [u8; CLIENT_AUTH_BYTES]) -> i32 {
+        unsafe { shs1_create_client_auth(auth, self) }
+    }
+
+    pub fn verify_server_ack(&mut self, ack: &[u8; SERVER_ACK_BYTES]) -> bool {
+        unsafe { shs1_verify_server_ack(ack, self) }
+    }
+
+    pub fn outcome(&mut self, outcome: &mut Outcome) {
+        unsafe { shs1_client_outcome(outcome, self) }
+    }
+
+    pub fn clean(&mut self) {
+        unsafe { shs1_client_clean(self) }
+    }
 }
 
-/// When the server receives the client's challenge, it needs to verify it. The challenge is considered valid, if the first 32 bytes match the HMAC-SHA-512-256 of the last 32 bytes using the appkey as the hmac key.
-// TODO
-pub fn verify_client_challenge(client_challenge: &[u8; 64]) -> bool {
-    false
+/// The struct used in the C code to perform the server side of a handshake.
+#[repr(C)]
+// #[derive(Debug)]
+pub struct Server {
+    app: *const [u8; auth::KEYBYTES],
+    pub_: *const [u8; sign::PUBLICKEYBYTES],
+    sec: *const [u8; sign::SECRETKEYBYTES],
+    eph_pub: *const [u8; box_::PUBLICKEYBYTES],
+    eph_sec: *const [u8; box_::SECRETKEYBYTES],
+    //intermediate results
+    client_hello: [u8; sign::SIGNATUREBYTES + sign::PUBLICKEYBYTES],
+    shared_hash: [u8; sha256::DIGESTBYTES],
+    client_eph_pub: [u8; box_::PUBLICKEYBYTES],
+    client_pub: [u8; sign::PUBLICKEYBYTES],
+    box_sec: [u8; sha256::DIGESTBYTES],
 }
 
-/// Note: This function does not conform to the secret-handshake protocol.
-/// Instead it reproduces a mistake in the reference implementation. Use
-/// this if interoperability with peers using the old reference
-/// implementation is necessary. If interoperability is not a concern, use
-/// `create_server_challenge` instead.
-///
-/// After receiving and verifying the client's challenge, the server creates it's own challenge. This challenge consists of the HMAC-SHA-512-256 of an ephemeral public key using the appkey as the hmac key, and of the ephemeral public key itself. This is the same as `create_client_challenge` (exept for using a different ephemeral key).
-#[deprecated(note="the legacy methods will be removed when the shs ecosystem stops using the faulty implementation")]
-pub fn legacy_create_server_challenge(app_key: &auth::Key,
-                                      server_eph_pub_key: &box_::PublicKey)
-                                      -> (auth::Tag, box_::PublicKey) {
-    let server_app_hmac = auth::authenticate(&server_eph_pub_key[..], app_key);
-    return (server_app_hmac, *server_eph_pub_key);
+impl Server {
+    pub fn new(app: *const [u8; auth::KEYBYTES],
+               pub_: *const [u8; sign::PUBLICKEYBYTES],
+               sec: *const [u8; sign::SECRETKEYBYTES],
+               eph_pub: *const [u8; box_::PUBLICKEYBYTES],
+               eph_sec: *const [u8; box_::SECRETKEYBYTES])
+               -> Server {
+        Server {
+            app,
+            pub_,
+            sec,
+            eph_pub,
+            eph_sec,
+            client_hello: unsafe { uninitialized() },
+            shared_hash: unsafe { uninitialized() },
+            client_eph_pub: unsafe { uninitialized() },
+            client_pub: unsafe { uninitialized() },
+            box_sec: unsafe { uninitialized() },
+        }
+    }
+
+    pub fn verify_client_challenge(&mut self, challenge: &[u8; CLIENT_CHALLENGE_BYTES]) -> bool {
+        unsafe { shs1_verify_client_challenge(challenge, self) }
+    }
+
+    pub fn create_server_challenge(&mut self, challenge: &mut [u8; SERVER_CHALLENGE_BYTES]) {
+        unsafe { shs1_create_server_challenge(challenge, self) }
+    }
+
+    pub fn verify_client_auth(&mut self, auth: &[u8; CLIENT_AUTH_BYTES]) {
+        unsafe { shs1_verify_client_auth(auth, self) }
+    }
+
+    pub fn create_server_acc(&mut self, ack: *mut [u8; SERVER_ACK_BYTES]) {
+        unsafe { shs1_create_server_acc(ack, self) }
+    }
+
+    pub fn outcome(&mut self, outcome: &mut Outcome) {
+        unsafe { shs1_server_outcome(outcome, self) }
+    }
+
+    pub fn clean(&mut self) {
+        unsafe { shs1_server_clean(self) }
+    }
 }
 
-/// After receiving and verifying the client's challenge, the server creates it's own challenge. This challenge consists of the HMAC-SHA-512-256 of an ephemeral public key using `sha256(appkey ++ scalar_mult())` as the hmac key, and of the ephemeral public key itself.
-// TODO
-pub fn create_server_challenge(app_key: &auth::Key,
-                               server_eph_pub_key: &box_::PublicKey)
-                               -> (auth::Tag, box_::PublicKey) {
-    let server_app_hmac = auth::authenticate(&server_eph_pub_key[..], app_key); // TODO
-    return (server_app_hmac, *server_eph_pub_key);
-}
-
-/// Note: This function does not conform to the secret-handshake protocol.
-/// Instead it reproduces a mistake in the reference implementation. Use
-/// this if interoperability with peers using the old reference
-/// implementation is necessary. If interoperability is not a concern, use
-/// `create_server_challenge` instead.
-///
-/// When the client receives the server's challenge, it needs to verify it. The challenge is considered valid, if the first 32 bytes match the HMAC-SHA-512-256 of the last 32 bytes using the appkey as the hmac key. This is the same as `verify_client_challenge`
-// TODO
-#[deprecated(note="the legacy methods will be removed when the shs ecosystem stops using the faulty implementation")]
-pub fn legacy_verify_server_challenge(server_challenge: &[u8]) -> bool {
-    // return verify_client_challenge(server_challenge);
-    false
-}
-
-/// When the client receives the server's challenge, it needs to verify it. The challenge is considered valid, if the first 32 bytes match the HMAC-SHA-512-256 of the last 32 bytes using the appkey as the hmac key. This is the same as `verify_client_challenge`
-// TODO
-pub fn verify_server_challenge() -> bool {
-    false
-}
-
-pub fn create_client_authentication() -> () {}
-
-pub fn verify_client_authentication() -> bool {
-    false
-}
-
-pub fn create_server_authentication() -> () {}
-
-pub fn verify_server_authentication() -> bool {
-    false
+extern "C" {
+    // client side
+    fn shs1_create_client_challenge(challenge: *mut [u8; CLIENT_CHALLENGE_BYTES],
+                                    client: *mut Client);
+    fn shs1_verify_server_challenge(challenge: *const [u8; CLIENT_CHALLENGE_BYTES],
+                                    client: *mut Client)
+                                    -> bool;
+    fn shs1_create_client_auth(auth: *mut [u8; CLIENT_AUTH_BYTES], client: *mut Client) -> i32;
+    fn shs1_verify_server_ack(ack: *const [u8; SERVER_ACK_BYTES], client: *mut Client) -> bool;
+    fn shs1_client_outcome(outcome: *mut Outcome, client: *mut Client);
+    fn shs1_client_clean(client: *mut Client);
+    // server side
+    fn shs1_verify_client_challenge(challenge: *const [u8; CLIENT_CHALLENGE_BYTES],
+                                    server: *mut Server)
+                                    -> bool;
+    fn shs1_create_server_challenge(challenge: *mut [u8; SERVER_CHALLENGE_BYTES],
+                                    server: *mut Server);
+    fn shs1_verify_client_auth(auth: *const [u8; CLIENT_AUTH_BYTES], server: *mut Server);
+    fn shs1_create_server_acc(ack: *mut [u8; SERVER_ACK_BYTES], server: *mut Server);
+    fn shs1_server_outcome(outcome: *mut Outcome, server: *mut Server);
+    fn shs1_server_clean(server: *mut Server);
 }
