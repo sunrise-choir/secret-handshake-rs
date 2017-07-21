@@ -27,6 +27,34 @@ pub struct Outcome {
     padding_decryption: [u8; 8],
 }
 
+/// Zero out all sensitive data when going out of scope
+impl Drop for Outcome {
+    fn drop(&mut self) {
+        self.encryption_key = [0; secretbox::KEYBYTES];
+        self.encryption_nonce = [0; secretbox::NONCEBYTES];
+        self.decryption_key = [0; secretbox::KEYBYTES];
+        self.decryption_nonce = [0; secretbox::NONCEBYTES];
+    }
+}
+
+impl Outcome {
+    pub fn encryption_key(&self) -> &[u8; secretbox::KEYBYTES] {
+        &self.encryption_key
+    }
+
+    pub fn encryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
+        &self.encryption_nonce
+    }
+
+    pub fn decryption_key(&self) -> &[u8; secretbox::KEYBYTES] {
+        &self.decryption_key
+    }
+
+    pub fn decryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
+        &self.decryption_nonce
+    }
+}
+
 /// The struct used in the C code to perform the client side of a handshake.
 #[repr(C)]
 // #[derive(Debug)]
@@ -140,7 +168,7 @@ impl Server {
         unsafe { shs1_create_server_challenge(challenge, self) }
     }
 
-    pub fn verify_client_auth(&mut self, auth: &[u8; CLIENT_AUTH_BYTES]) {
+    pub fn verify_client_auth(&mut self, auth: &[u8; CLIENT_AUTH_BYTES]) -> bool {
         unsafe { shs1_verify_client_auth(auth, self) }
     }
 
@@ -174,7 +202,7 @@ extern "C" {
                                     -> bool;
     fn shs1_create_server_challenge(challenge: *mut [u8; SERVER_CHALLENGE_BYTES],
                                     server: *mut Server);
-    fn shs1_verify_client_auth(auth: *const [u8; CLIENT_AUTH_BYTES], server: *mut Server);
+    fn shs1_verify_client_auth(auth: *const [u8; CLIENT_AUTH_BYTES], server: *mut Server) -> bool;
     fn shs1_create_server_acc(ack: *mut [u8; SERVER_ACK_BYTES], server: *mut Server);
     fn shs1_server_outcome(outcome: *mut Outcome, server: *mut Server);
     fn shs1_server_clean(server: *mut Server);
