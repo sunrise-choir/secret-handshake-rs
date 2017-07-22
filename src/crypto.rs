@@ -132,8 +132,15 @@ impl Client {
     }
 
     /// Zeros out all sensitive data in the `Client`.
-    pub fn clean(&mut self) {
+    fn clean(&mut self) {
         unsafe { shs1_client_clean(self) }
+    }
+}
+
+/// Zero out all sensitive data when going out of scope.
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.clean();
     }
 }
 
@@ -228,4 +235,11 @@ extern "C" {
     fn shs1_create_server_acc(ack: *mut [u8; SERVER_ACK_BYTES], server: *mut Server);
     fn shs1_server_outcome(outcome: *mut Outcome, server: *mut Server);
     fn shs1_server_clean(server: *mut Server);
+}
+
+/// Zero out all sensitive data when going out of scope.
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.clean();
+    }
 }

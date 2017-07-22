@@ -6,6 +6,7 @@ authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
 [dependencies]
 sodiumoxide = "0.0.15"
 libc = "0.2"
+futures = "0.1.14"
 
 [dev-dependencies]
 partial-io = { version = "0.2.3", features = ["quickcheck"] }

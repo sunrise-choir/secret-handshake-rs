@@ -11,6 +11,7 @@ use partial_io::{PartialOp, PartialRead, PartialWrite, PartialWithErrors};
 use partial_io::quickcheck_types::GenInterruptedWouldBlock;
 
 /// A duplex stream for testing: it records all writes to it, and reads return predefined data
+#[derive(Debug)]
 struct TestDuplex<'a> {
     writes: Vec<u8>,
     read_data: &'a [u8],
@@ -103,18 +104,19 @@ static EXP_SERVER_DEC_NONCE: [u8; secretbox::NONCEBYTES] = [44, 140, 79, 227, 23
 #[test]
 // A client aborts the handshake if it receives an invalid challenge from the server.
 fn test_client_invalid_challenge() {
-    let mut client = ClientHandshaker::new(&APP,
-                                           &CLIENT_PUB,
-                                           &CLIENT_SEC,
-                                           &CLIENT_EPH_PUB,
-                                           &CLIENT_EPH_SEC,
-                                           &SERVER_PUB);
-
     let invalid_server_challenge = [1u8; SERVER_CHALLENGE_BYTES];
-    let mut stream = TestDuplex::new(&invalid_server_challenge);
+    let stream = TestDuplex::new(&invalid_server_challenge);
+    let client = ClientHandshaker::new(stream,
+                                       &APP,
+                                       &CLIENT_PUB,
+                                       &CLIENT_SEC,
+                                       &CLIENT_EPH_PUB,
+                                       &CLIENT_EPH_SEC,
+                                       &SERVER_PUB);
 
-    match client.shake_hands(&mut stream).unwrap_err() {
-        ClientHandshakeError::InvalidChallenge => assert!(true),
+
+    match client.shake_hands().unwrap_err() {
+        ClientHandshakeError::InvalidChallenge(_) => assert!(true),
         _ => assert!(false),
     }
 }
@@ -122,21 +124,21 @@ fn test_client_invalid_challenge() {
 #[test]
 // A client aborts the handshake if it receives an invalid ack from the server.
 fn test_client_invalid_ack() {
-    let mut client = ClientHandshaker::new(&APP,
-                                           &CLIENT_PUB,
-                                           &CLIENT_SEC,
-                                           &CLIENT_EPH_PUB,
-                                           &CLIENT_EPH_SEC,
-                                           &SERVER_PUB);
-
     let data = [
       44,140,79,227,23,153,202,203,81,40,114,59,56,167,63,166,201,9,50,152,0,255,226,147,22,43,84,99,107,198,198,219,166,12,63,218,235,136,61,99,232,142,165,147,88,93,79,177,23,148,129,57,179,24,192,174,90,62,40,83,51,9,97,82, // end valid server challenge
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 // end invalid server ack
     ];
-    let mut stream = TestDuplex::new(&data);
+    let stream = TestDuplex::new(&data);
+    let client = ClientHandshaker::new(stream,
+                                       &APP,
+                                       &CLIENT_PUB,
+                                       &CLIENT_SEC,
+                                       &CLIENT_EPH_PUB,
+                                       &CLIENT_EPH_SEC,
+                                       &SERVER_PUB);
 
-    match client.shake_hands(&mut stream).unwrap_err() {
-        ClientHandshakeError::InvalidAck => assert!(true),
+    match client.shake_hands().unwrap_err() {
+        ClientHandshakeError::InvalidAck(_) => assert!(true),
         _ => assert!(false),
     }
 }
@@ -144,13 +146,6 @@ fn test_client_invalid_ack() {
 #[test]
 // A client propagates io errors in the handshake
 fn test_client_io_error() {
-    let mut client = ClientHandshaker::new(&APP,
-                                           &CLIENT_PUB,
-                                           &CLIENT_SEC,
-                                           &CLIENT_EPH_PUB,
-                                           &CLIENT_EPH_SEC,
-                                           &SERVER_PUB);
-
     let valid_server_challenge = [44u8, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147, 22, 43, 84, 99, 107,
                                   198, 198, 219, 166, 12, 63, 218, 235, 136, 61, 99, 232, 142,
@@ -160,10 +155,18 @@ fn test_client_io_error() {
     let read_ops = vec![PartialOp::Unlimited,
                         PartialOp::Err(io::ErrorKind::NotFound)];
     let stream = PartialWrite::new(stream, vec![]);
-    let mut stream = PartialRead::new(stream, read_ops);
+    let stream = PartialRead::new(stream, read_ops);
 
-    match client.shake_hands(&mut stream).unwrap_err() {
-        ClientHandshakeError::IoErr(e) => assert_eq!(e.kind(), io::ErrorKind::NotFound),
+    let client = ClientHandshaker::new(stream,
+                                       &APP,
+                                       &CLIENT_PUB,
+                                       &CLIENT_SEC,
+                                       &CLIENT_EPH_PUB,
+                                       &CLIENT_EPH_SEC,
+                                       &SERVER_PUB);
+
+    match client.shake_hands().unwrap_err() {
+        ClientHandshakeError::IoErr(e, _) => assert_eq!(e.kind(), io::ErrorKind::NotFound),
         _ => assert!(false),
     }
 }
@@ -171,20 +174,21 @@ fn test_client_io_error() {
 #[test]
 // A handhake succeeds if the server replies correctly.
 fn test_client_success_simple() {
-    let mut client = ClientHandshaker::new(&APP,
-                                           &CLIENT_PUB,
-                                           &CLIENT_SEC,
-                                           &CLIENT_EPH_PUB,
-                                           &CLIENT_EPH_SEC,
-                                           &SERVER_PUB);
-
     let data = [
       44,140,79,227,23,153,202,203,81,40,114,59,56,167,63,166,201,9,50,152,0,255,226,147,22,43,84,99,107,198,198,219,166,12,63,218,235,136,61,99,232,142,165,147,88,93,79,177,23,148,129,57,179,24,192,174,90,62,40,83,51,9,97,82, // end valid server challenge
       72,114,92,105,109,48,17,14,25,150,242,50,148,70,49,25,222,254,255,124,194,144,84,114,190,148,252,189,159,132,157,173,92,14,247,198,87,232,141,83,84,79,226,43,194,95,14,8,138,233,96,40,126,153,205,36,95,203,200,202,221,118,126,99,47,216,209,219,3,133,240,216,166,182,182,226,215,116,177,66 // end valid server ack
     ];
-    let mut stream = TestDuplex::new(&data);
+    let stream = TestDuplex::new(&data);
 
-    let outcome = client.shake_hands(&mut stream).unwrap();
+    let client = ClientHandshaker::new(stream,
+                                       &APP,
+                                       &CLIENT_PUB,
+                                       &CLIENT_SEC,
+                                       &CLIENT_EPH_PUB,
+                                       &CLIENT_EPH_SEC,
+                                       &SERVER_PUB);
+
+    let (outcome, _) = client.shake_hands().unwrap();
 
     assert_eq!(outcome.encryption_key(), &EXP_CLIENT_ENC_KEY);
     assert_eq!(outcome.encryption_nonce(), &EXP_CLIENT_ENC_NONCE);
@@ -192,52 +196,61 @@ fn test_client_success_simple() {
     assert_eq!(outcome.decryption_nonce(), &EXP_CLIENT_DEC_NONCE);
 }
 
+fn run_client_handshake<S: Read + Write>(client: ClientHandshaker<S>) -> bool {
+    match client.shake_hands() {
+        Err(e) => {
+            match e {
+                ClientHandshakeError::IoErr(_, client) => {
+                    return run_client_handshake(client);
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok((outcome, _)) => {
+            assert_eq!(outcome.encryption_key(), &EXP_CLIENT_ENC_KEY);
+            assert_eq!(outcome.encryption_nonce(), &EXP_CLIENT_ENC_NONCE);
+            assert_eq!(outcome.decryption_key(), &EXP_CLIENT_DEC_KEY);
+            assert_eq!(outcome.decryption_nonce(), &EXP_CLIENT_DEC_NONCE);
+            return true;
+        }
+    }
+}
+
 quickcheck! {
       fn test_client_success_randomized(write_ops: PartialWithErrors<GenInterruptedWouldBlock>, read_ops: PartialWithErrors<GenInterruptedWouldBlock>) -> bool {
-          let mut client = ClientHandshaker::new(&APP,
-                                                 &CLIENT_PUB,
-                                                 &CLIENT_SEC,
-                                                 &CLIENT_EPH_PUB,
-                                                 &CLIENT_EPH_SEC,
-                                                 &SERVER_PUB);
-
           let data = [
             44,140,79,227,23,153,202,203,81,40,114,59,56,167,63,166,201,9,50,152,0,255,226,147,22,43,84,99,107,198,198,219,166,12,63,218,235,136,61,99,232,142,165,147,88,93,79,177,23,148,129,57,179,24,192,174,90,62,40,83,51,9,97,82, // end valid server challenge
             72,114,92,105,109,48,17,14,25,150,242,50,148,70,49,25,222,254,255,124,194,144,84,114,190,148,252,189,159,132,157,173,92,14,247,198,87,232,141,83,84,79,226,43,194,95,14,8,138,233,96,40,126,153,205,36,95,203,200,202,221,118,126,99,47,216,209,219,3,133,240,216,166,182,182,226,215,116,177,66 // end valid server ack
           ];
           let stream = TestDuplex::new(&data);
           let stream = PartialWrite::new(stream, write_ops);
-          let mut stream = PartialRead::new(stream, read_ops);
+          let stream = PartialRead::new(stream, read_ops);
 
-          loop {
-            match client.shake_hands(&mut stream) {
-              Err(_) => {},
-              Ok(outcome) => {
-                assert_eq!(outcome.encryption_key(), &EXP_CLIENT_ENC_KEY);
-                assert_eq!(outcome.encryption_nonce(), &EXP_CLIENT_ENC_NONCE);
-                assert_eq!(outcome.decryption_key(), &EXP_CLIENT_DEC_KEY);
-                assert_eq!(outcome.decryption_nonce(), &EXP_CLIENT_DEC_NONCE);
-                return true;
-              }
-            }
-          }
+          let client = ClientHandshaker::new(stream,&APP,
+                                                 &CLIENT_PUB,
+                                                 &CLIENT_SEC,
+                                                 &CLIENT_EPH_PUB,
+                                                 &CLIENT_EPH_SEC,
+                                                 &SERVER_PUB);
+
+          return run_client_handshake(client);
       }
   }
 
 #[test]
 // A server aborts the handshake if it receives an invalid challenge from the client.
 fn test_server_invalid_challenge() {
-    let mut server = ServerHandshaker::new(&APP,
-                                           &SERVER_PUB,
-                                           &SERVER_SEC,
-                                           &SERVER_EPH_PUB,
-                                           &SERVER_EPH_SEC);
-
     let invalid_client_challenge = [1u8; CLIENT_CHALLENGE_BYTES];
-    let mut stream = TestDuplex::new(&invalid_client_challenge);
+    let stream = TestDuplex::new(&invalid_client_challenge);
+    let server = ServerHandshaker::new(stream,
+                                       &APP,
+                                       &SERVER_PUB,
+                                       &SERVER_SEC,
+                                       &SERVER_EPH_PUB,
+                                       &SERVER_EPH_SEC);
 
-    match server.shake_hands(&mut stream).unwrap_err() {
-        ServerHandshakeError::InvalidChallenge => assert!(true),
+    match server.shake_hands().unwrap_err() {
+        ServerHandshakeError::InvalidChallenge(_) => assert!(true),
         _ => assert!(false),
     }
 }
@@ -245,20 +258,20 @@ fn test_server_invalid_challenge() {
 #[test]
 // A server aborts the handshake if it receives an invalid auth from the server.
 fn test_server_invalid_auth() {
-    let mut server = ServerHandshaker::new(&APP,
-                                           &SERVER_PUB,
-                                           &SERVER_SEC,
-                                           &SERVER_EPH_PUB,
-                                           &SERVER_EPH_SEC);
-
     let data = [
         211,6,20,155,178,209,30,107,1,3,140,242,73,101,116,234,249,127,131,227,142,66,240,195,13,50,38,96,7,208,124,180,79,79,77,238,254,215,129,197,235,41,185,208,47,32,146,37,255,237,208,215,182,92,201,106,85,86,157,41,53,165,177,32, // end valid client challenge
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 // end invalid client auth
       ];
-    let mut stream = TestDuplex::new(&data);
+    let stream = TestDuplex::new(&data);
+    let server = ServerHandshaker::new(stream,
+                                       &APP,
+                                       &SERVER_PUB,
+                                       &SERVER_SEC,
+                                       &SERVER_EPH_PUB,
+                                       &SERVER_EPH_SEC);
 
-    match server.shake_hands(&mut stream).unwrap_err() {
-        ServerHandshakeError::InvalidAuth => assert!(true),
+    match server.shake_hands().unwrap_err() {
+        ServerHandshakeError::InvalidAuth(_) => assert!(true),
         _ => assert!(false),
     }
 }
@@ -266,12 +279,6 @@ fn test_server_invalid_auth() {
 #[test]
 // A server propagates io errors in the handshake
 fn test_server_io_error() {
-    let mut server = ServerHandshaker::new(&APP,
-                                           &SERVER_PUB,
-                                           &SERVER_SEC,
-                                           &SERVER_EPH_PUB,
-                                           &SERVER_EPH_SEC);
-
     let valid_client_challenge = [211u8, 6, 20, 155, 178, 209, 30, 107, 1, 3, 140, 242, 73, 101,
                                   116, 234, 249, 127, 131, 227, 142, 66, 240, 195, 13, 50, 38, 96,
                                   7, 208, 124, 180, 79, 79, 77, 238, 254, 215, 129, 197, 235, 41,
@@ -281,10 +288,16 @@ fn test_server_io_error() {
     let read_ops = vec![PartialOp::Unlimited,
                         PartialOp::Err(io::ErrorKind::NotFound)];
     let stream = PartialWrite::new(stream, vec![]);
-    let mut stream = PartialRead::new(stream, read_ops);
+    let stream = PartialRead::new(stream, read_ops);
+    let server = ServerHandshaker::new(stream,
+                                       &APP,
+                                       &SERVER_PUB,
+                                       &SERVER_SEC,
+                                       &SERVER_EPH_PUB,
+                                       &SERVER_EPH_SEC);
 
-    match server.shake_hands(&mut stream).unwrap_err() {
-        ServerHandshakeError::IoErr(e) => assert_eq!(e.kind(), io::ErrorKind::NotFound),
+    match server.shake_hands().unwrap_err() {
+        ServerHandshakeError::IoErr(e, _) => assert_eq!(e.kind(), io::ErrorKind::NotFound),
         _ => assert!(false),
     }
 }
@@ -292,19 +305,19 @@ fn test_server_io_error() {
 #[test]
 // A handhake succeeds if the client replies correctly.
 fn test_server_success_simple() {
-    let mut server = ServerHandshaker::new(&APP,
-                                           &SERVER_PUB,
-                                           &SERVER_SEC,
-                                           &SERVER_EPH_PUB,
-                                           &SERVER_EPH_SEC);
-
     let data = [
     211,6,20,155,178,209,30,107,1,3,140,242,73,101,116,234,249,127,131,227,142,66,240,195,13,50,38,96,7,208,124,180,79,79,77,238,254,215,129,197,235,41,185,208,47,32,146,37,255,237,208,215,182,92,201,106,85,86,157,41,53,165,177,32, // end valid client challenge
     80,34,24,195,46,211,235,66,91,89,65,98,137,26,86,197,32,4,153,142,160,18,56,180,12,171,127,38,44,53,74,64,55,188,22,25,161,25,7,243,200,196,145,249,207,211,88,178,0,206,173,234,188,20,251,240,199,169,94,180,212,32,150,226,138,44,141,235,33,152,91,215,31,126,48,48,220,239,97,225,103,79,190,56,227,103,142,195,124,10,21,76,66,11,194,11,220,15,163,66,138,232,228,12,130,172,4,137,52,159,64,98 // end valid client auth
       ];
-    let mut stream = TestDuplex::new(&data);
+    let stream = TestDuplex::new(&data);
+    let server = ServerHandshaker::new(stream,
+                                       &APP,
+                                       &SERVER_PUB,
+                                       &SERVER_SEC,
+                                       &SERVER_EPH_PUB,
+                                       &SERVER_EPH_SEC);
 
-    let outcome = server.shake_hands(&mut stream).unwrap();
+    let (outcome, _) = server.shake_hands().unwrap();
 
     assert_eq!(outcome.encryption_key(), &EXP_SERVER_ENC_KEY);
     assert_eq!(outcome.encryption_nonce(), &EXP_SERVER_ENC_NONCE);
@@ -312,33 +325,42 @@ fn test_server_success_simple() {
     assert_eq!(outcome.decryption_nonce(), &EXP_SERVER_DEC_NONCE);
 }
 
+fn run_server_handshake<S: Read + Write>(server: ServerHandshaker<S>) -> bool {
+    match server.shake_hands() {
+        Err(e) => {
+            match e {
+                ServerHandshakeError::IoErr(_, server) => {
+                    return run_server_handshake(server);
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok((outcome, _)) => {
+            assert_eq!(outcome.encryption_key(), &EXP_SERVER_ENC_KEY);
+            assert_eq!(outcome.encryption_nonce(), &EXP_SERVER_ENC_NONCE);
+            assert_eq!(outcome.decryption_key(), &EXP_SERVER_DEC_KEY);
+            assert_eq!(outcome.decryption_nonce(), &EXP_SERVER_DEC_NONCE);
+            return true;
+        }
+    }
+}
+
 quickcheck! {
         fn test_server_success_randomized(write_ops: PartialWithErrors<GenInterruptedWouldBlock>, read_ops: PartialWithErrors<GenInterruptedWouldBlock>) -> bool {
-          let mut server = ServerHandshaker::new(&APP,
-                                                 &SERVER_PUB,
-                                                 &SERVER_SEC,
-                                                 &SERVER_EPH_PUB,
-                                                 &SERVER_EPH_SEC);
-
           let data = [
           211,6,20,155,178,209,30,107,1,3,140,242,73,101,116,234,249,127,131,227,142,66,240,195,13,50,38,96,7,208,124,180,79,79,77,238,254,215,129,197,235,41,185,208,47,32,146,37,255,237,208,215,182,92,201,106,85,86,157,41,53,165,177,32, // end valid client challenge
           80,34,24,195,46,211,235,66,91,89,65,98,137,26,86,197,32,4,153,142,160,18,56,180,12,171,127,38,44,53,74,64,55,188,22,25,161,25,7,243,200,196,145,249,207,211,88,178,0,206,173,234,188,20,251,240,199,169,94,180,212,32,150,226,138,44,141,235,33,152,91,215,31,126,48,48,220,239,97,225,103,79,190,56,227,103,142,195,124,10,21,76,66,11,194,11,220,15,163,66,138,232,228,12,130,172,4,137,52,159,64,98 // end valid client auth
             ];
           let stream = TestDuplex::new(&data);
             let stream = PartialWrite::new(stream, write_ops);
-            let mut stream = PartialRead::new(stream, read_ops);
+            let stream = PartialRead::new(stream, read_ops);
+            let server = ServerHandshaker::new(stream,
+                                               &APP,
+                                               &SERVER_PUB,
+                                               &SERVER_SEC,
+                                               &SERVER_EPH_PUB,
+                                               &SERVER_EPH_SEC);
 
-            loop {
-              match server.shake_hands(&mut stream) {
-                Err(_) => {},
-                Ok(outcome) => {
-                  assert_eq!(outcome.encryption_key(), &EXP_SERVER_ENC_KEY);
-                  assert_eq!(outcome.encryption_nonce(), &EXP_SERVER_ENC_NONCE);
-                  assert_eq!(outcome.decryption_key(), &EXP_SERVER_DEC_KEY);
-                  assert_eq!(outcome.decryption_nonce(), &EXP_SERVER_DEC_NONCE);
-                  return true;
-                }
-              }
-            }
+            return run_server_handshake(server);
         }
     }
