@@ -9,9 +9,13 @@ use sodiumoxide::crypto::auth;
 
 use std::mem::uninitialized;
 
+/// Length of the client challenge in bytes.
 pub const CLIENT_CHALLENGE_BYTES: usize = 64;
+/// Length of the server challenge in bytes.
 pub const SERVER_CHALLENGE_BYTES: usize = 64;
+/// Length of the client authentication in bytes.
 pub const CLIENT_AUTH_BYTES: usize = 112;
+/// Length of the server ackknowledgement in bytes.
 pub const SERVER_ACK_BYTES: usize = 80;
 
 /// The data resulting from a handshake: Keys and nonces suitable for encrypted
@@ -38,18 +42,22 @@ impl Drop for Outcome {
 }
 
 impl Outcome {
+    /// The negotiated key that should be used to encrypt messages to the peer.
     pub fn encryption_key(&self) -> &[u8; secretbox::KEYBYTES] {
         &self.encryption_key
     }
 
+    /// The negotiated initial nonce that should be used to encrypt messages to the peer.
     pub fn encryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
         &self.encryption_nonce
     }
 
+    /// The negotiated key that should be used to decrypt messages from the peer.
     pub fn decryption_key(&self) -> &[u8; secretbox::KEYBYTES] {
         &self.decryption_key
     }
 
+    /// The negotiated initial nonce that should be used to decrypt messages from the peer.
     pub fn decryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
         &self.decryption_nonce
     }
@@ -75,6 +83,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Creates and initializes a new `Client`.
     pub fn new(app: *const [u8; auth::KEYBYTES],
                pub_: *const [u8; sign::PUBLICKEYBYTES],
                sec: *const [u8; sign::SECRETKEYBYTES],
@@ -97,26 +106,32 @@ impl Client {
         }
     }
 
+    /// Writes the client challenge into `challenge` and updates the client state.
     pub fn create_client_challenge(&mut self, challenge: &mut [u8; CLIENT_CHALLENGE_BYTES]) {
         unsafe { shs1_create_client_challenge(challenge, self) }
     }
 
+    /// Verifies the given server `challenge` and updates the client state.
     pub fn verify_server_challenge(&mut self, challenge: &[u8; CLIENT_CHALLENGE_BYTES]) -> bool {
         unsafe { shs1_verify_server_challenge(challenge, self) }
     }
 
+    /// Writes the client authentication into `auth` and updates the client state.
     pub fn create_client_auth(&mut self, auth: &mut [u8; CLIENT_AUTH_BYTES]) -> i32 {
         unsafe { shs1_create_client_auth(auth, self) }
     }
 
+    /// Verifies the given server `ack`knowledgement and updates the client state.
     pub fn verify_server_ack(&mut self, ack: &[u8; SERVER_ACK_BYTES]) -> bool {
         unsafe { shs1_verify_server_ack(ack, self) }
     }
 
+    /// Computes the outcome of the handshake and writes it into `outcome`.
     pub fn outcome(&mut self, outcome: &mut Outcome) {
         unsafe { shs1_client_outcome(outcome, self) }
     }
 
+    /// Zeros out all sensitive data in the `Client`.
     pub fn clean(&mut self) {
         unsafe { shs1_client_clean(self) }
     }
@@ -140,6 +155,7 @@ pub struct Server {
 }
 
 impl Server {
+    /// Creates and initializes a new `Server`.
     pub fn new(app: *const [u8; auth::KEYBYTES],
                pub_: *const [u8; sign::PUBLICKEYBYTES],
                sec: *const [u8; sign::SECRETKEYBYTES],
@@ -160,26 +176,32 @@ impl Server {
         }
     }
 
+    /// Verifies the given client `challenge` and updates the server state.
     pub fn verify_client_challenge(&mut self, challenge: &[u8; CLIENT_CHALLENGE_BYTES]) -> bool {
         unsafe { shs1_verify_client_challenge(challenge, self) }
     }
 
+    /// Writes the server challenge into `challenge` and updates the server state.
     pub fn create_server_challenge(&mut self, challenge: &mut [u8; SERVER_CHALLENGE_BYTES]) {
         unsafe { shs1_create_server_challenge(challenge, self) }
     }
 
+    /// Verifies the given client `auth`entication and updates the server state.
     pub fn verify_client_auth(&mut self, auth: &[u8; CLIENT_AUTH_BYTES]) -> bool {
         unsafe { shs1_verify_client_auth(auth, self) }
     }
 
+    /// Writes the server ackknowledgement into `ack` and updates the server state.
     pub fn create_server_acc(&mut self, ack: *mut [u8; SERVER_ACK_BYTES]) {
         unsafe { shs1_create_server_acc(ack, self) }
     }
 
+    /// Computes the outcome of the handshake and writes it into `outcome`.
     pub fn outcome(&mut self, outcome: &mut Outcome) {
         unsafe { shs1_server_outcome(outcome, self) }
     }
 
+    /// Zeros out all sensitive data in the `Server`.
     pub fn clean(&mut self) {
         unsafe { shs1_server_clean(self) }
     }

@@ -10,6 +10,7 @@ use sodiumoxide::crypto::auth;
 
 use crypto::*;
 
+/// Performs the client side of a handshake, holding state between different steps.
 pub struct ClientHandshaker {
     client: Client,
     state: ClientResumeState,
@@ -18,6 +19,8 @@ pub struct ClientHandshaker {
 }
 
 impl ClientHandshaker {
+    /// Creates a new ClientHandshaker to connect to a server with known public key
+    /// and app key.
     pub fn new(app: &[u8; auth::KEYBYTES],
                pub_: &[u8; sign::PUBLICKEYBYTES],
                sec: &[u8; sign::SECRETKEYBYTES],
@@ -41,10 +44,18 @@ impl ClientHandshaker {
         ret
     }
 
+    /// Returns the current phase of the handshake. Useful to determine what happens
+    /// next, or when exactly an IO error occured.
     pub fn get_resume_state(&self) -> ClientResumeState {
         self.state
     }
 
+    /// Performs the handshake, using the provided duplex stream to negotiate
+    /// an `Outcome`.
+    ///
+    /// To get a correct outcome, always pass the same stream to the same
+    /// `ClientHandshaker`, and don't read to or write from that stream until
+    /// `shake_hands` has returned `Ok(outcome)`.
     pub fn shake_hands<S: io::Read + io::Write>(&mut self,
                                                 stream: &mut S)
                                                 -> Result<Outcome, ClientHandshakeError> {
@@ -136,9 +147,13 @@ impl Drop for ClientHandshaker {
 /// Indicates where a ClientHandshaker will resume a partial handshake.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClientResumeState {
+    /// Write the client challenge to the server.
     WriteClientChallenge,
+    /// Read the server challenge, then validate it.
     ReadServerChallenge,
+    /// Write the client authentication to the server.
     WriteClientAuth,
+    /// Read the server ackknowledgement, then validate it and end the handshake.
     ReadServerAck,
 }
 
@@ -146,7 +161,8 @@ pub enum ClientResumeState {
 /// should be considered fatal errors.
 #[derive(Debug)]
 pub enum ClientHandshakeError {
-    /// An io error occured during reading or writing.
+    /// An io error occured during reading or writing. If the error is not fatal,
+    /// you can simply call `shake_hands` again at a later point.
     IoErr(io::Error),
     /// The received challenge is invalid, e.g. because the server assumed a
     /// wrong protocol (version).

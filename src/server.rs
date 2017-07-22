@@ -10,6 +10,7 @@ use sodiumoxide::crypto::auth;
 
 use crypto::*;
 
+/// Performs the server side of a handshake, holding state between different steps.
 pub struct ServerHandshaker {
     server: Server,
     state: ServerResumeState,
@@ -18,6 +19,8 @@ pub struct ServerHandshaker {
 }
 
 impl ServerHandshaker {
+    /// Creates a new ServerHandshaker to accept connections from a client which
+    /// know the server's public key and use the right app key.
     pub fn new(app: &[u8; auth::KEYBYTES],
                pub_: &[u8; sign::PUBLICKEYBYTES],
                sec: &[u8; sign::SECRETKEYBYTES],
@@ -32,10 +35,18 @@ impl ServerHandshaker {
         }
     }
 
+    /// Returns the current phase of the handshake. Useful to determine what happens
+    /// next, or when exactly an IO error occured.
     pub fn get_resume_state(&self) -> ServerResumeState {
         self.state
     }
 
+    /// Performs the handshake, using the provided duplex stream to negotiate
+    /// an `Outcome`.
+    ///
+    /// To get a correct outcome, always pass the same stream to the same
+    /// `ServerHandshaker`, and don't read to or write from that stream until
+    /// `shake_hands` has returned `Ok(outcome)`.
     pub fn shake_hands<S: io::Read + io::Write>(&mut self,
                                                 stream: &mut S)
                                                 -> Result<Outcome, ServerHandshakeError> {
@@ -128,9 +139,13 @@ impl Drop for ServerHandshaker {
 /// Indicates where a ServerHandshaker will resume a partial handshake.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ServerResumeState {
+    /// Read the client challenge, then validate it.
     ReadClientChallenge,
+    /// Write the server challenge to the client.
     WriteServerChallenge,
+    /// Read the client authentication, then validate it.
     ReadClientAuth,
+    /// Write the server ackknowledgement to the client and end the handshake.
     WriteServerAck,
 }
 
