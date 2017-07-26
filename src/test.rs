@@ -6,9 +6,14 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::auth;
 use std::io::prelude::*;
 use std::io;
+use futures::Future;
+use futures::future::ok;
+use futures::{Poll, Async};
+use tokio_io::{AsyncRead, AsyncWrite};
 
-use partial_io::{PartialOp, PartialRead, PartialWrite, PartialWithErrors};
-use partial_io::quickcheck_types::GenInterruptedWouldBlock;
+use partial_io::{PartialOp, PartialRead, PartialWrite, PartialAsyncRead, PartialAsyncWrite,
+                 PartialWithErrors};
+use partial_io::quickcheck_types::{GenInterruptedWouldBlock, GenWouldBlock};
 
 /// A duplex stream for testing: it records all writes to it, and reads return predefined data
 #[derive(Debug)]
@@ -36,11 +41,19 @@ impl<'a> Write for TestDuplex<'a> {
     }
 }
 
+impl<'a> AsyncWrite for TestDuplex<'a> {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        Ok(Async::Ready(()))
+    }
+}
+
 impl<'a> Read for TestDuplex<'a> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         self.read_data.read(buf)
     }
 }
+
+impl<'a> AsyncRead for TestDuplex<'a> {}
 
 static APP: [u8; auth::KEYBYTES] = [111, 97, 159, 86, 19, 13, 53, 115, 66, 209, 32, 84, 255, 140,
                                     143, 85, 157, 74, 32, 154, 156, 90, 29, 185, 141, 19, 184,
@@ -234,6 +247,34 @@ quickcheck! {
                                                  &SERVER_PUB);
 
           return run_client_handshake(client);
+      }
+
+      fn test_client_success_randomized_async(write_ops: PartialWithErrors<GenWouldBlock>, read_ops: PartialWithErrors<GenWouldBlock>) -> bool {
+          let data = [
+            44,140,79,227,23,153,202,203,81,40,114,59,56,167,63,166,201,9,50,152,0,255,226,147,22,43,84,99,107,198,198,219,166,12,63,218,235,136,61,99,232,142,165,147,88,93,79,177,23,148,129,57,179,24,192,174,90,62,40,83,51,9,97,82, // end valid server challenge
+            72,114,92,105,109,48,17,14,25,150,242,50,148,70,49,25,222,254,255,124,194,144,84,114,190,148,252,189,159,132,157,173,92,14,247,198,87,232,141,83,84,79,226,43,194,95,14,8,138,233,96,40,126,153,205,36,95,203,200,202,221,118,126,99,47,216,209,219,3,133,240,216,166,182,182,226,215,116,177,66 // end valid server ack
+          ];
+          let stream = TestDuplex::new(&data);
+          let stream = PartialAsyncWrite::new(stream, write_ops);
+          let stream = PartialAsyncRead::new(stream, read_ops);
+
+          let client = ClientHandshaker::new(stream,
+                                                 &APP,
+                                                 &CLIENT_PUB,
+                                                 &CLIENT_SEC,
+                                                 &CLIENT_EPH_PUB,
+                                                 &CLIENT_EPH_SEC,
+                                                 &SERVER_PUB);
+
+          let mut flag = true;
+          let outcome = client.wait().unwrap();
+
+          if outcome.encryption_key() != &EXP_CLIENT_ENC_KEY {flag = false}
+          if outcome.encryption_nonce() != &EXP_CLIENT_ENC_NONCE {flag = false}
+          if outcome.decryption_key() != &EXP_CLIENT_DEC_KEY {flag = false}
+          if outcome.decryption_nonce() != &EXP_CLIENT_DEC_NONCE {flag = false}
+
+          return flag;
       }
   }
 

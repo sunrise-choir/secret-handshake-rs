@@ -7,9 +7,10 @@ authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
 sodiumoxide = "0.0.15"
 libc = "0.2"
 futures = "0.1.14"
+tokio-io = "0.1.2"
 
 [dev-dependencies]
-partial-io = { version = "0.2.3", features = ["quickcheck"] }
+partial-io = { version = "0.2.3", features = ["quickcheck", "tokio"] }
 quickcheck = "0.4.1"
 
 [build-dependencies]

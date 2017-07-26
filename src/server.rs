@@ -149,7 +149,6 @@ impl<S: io::Read + io::Write> ServerHandshaker<S> {
     }
 }
 
-// TODO provide a better implementation
 impl<S> fmt::Debug for ServerHandshaker<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "ServerHandshaker {{state: {:?}}}", self.state)
@@ -165,7 +164,7 @@ pub enum ServerResumeState {
     WriteServerChallenge,
     /// Read the client authentication, then validate it.
     ReadClientAuth,
-    /// Write the server ackknowledgement to the client and end the handshake.
+    /// Write the server acknowledgement to the client and end the handshake.
     WriteServerAck,
 }
 

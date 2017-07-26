@@ -15,7 +15,7 @@ pub const CLIENT_CHALLENGE_BYTES: usize = 64;
 pub const SERVER_CHALLENGE_BYTES: usize = 64;
 /// Length of the client authentication in bytes.
 pub const CLIENT_AUTH_BYTES: usize = 112;
-/// Length of the server ackknowledgement in bytes.
+/// Length of the server acknowledgement in bytes.
 pub const SERVER_ACK_BYTES: usize = 80;
 
 /// The data resulting from a handshake: Keys and nonces suitable for encrypted
@@ -198,9 +198,9 @@ impl Server {
         unsafe { shs1_verify_client_auth(auth, self) }
     }
 
-    /// Writes the server ackknowledgement into `ack` and updates the server state.
-    pub fn create_server_acc(&mut self, ack: *mut [u8; SERVER_ACK_BYTES]) {
-        unsafe { shs1_create_server_acc(ack, self) }
+    /// Writes the server acknowledgement into `ack` and updates the server state.
+    pub fn create_server_ack(&mut self, ack: *mut [u8; SERVER_ACK_BYTES]) {
+        unsafe { shs1_create_server_ack(ack, self) }
     }
 
     /// Computes the outcome of the handshake and writes it into `outcome`.
@@ -232,7 +232,7 @@ extern "C" {
     fn shs1_create_server_challenge(challenge: *mut [u8; SERVER_CHALLENGE_BYTES],
                                     server: *mut Server);
     fn shs1_verify_client_auth(auth: *const [u8; CLIENT_AUTH_BYTES], server: *mut Server) -> bool;
-    fn shs1_create_server_acc(ack: *mut [u8; SERVER_ACK_BYTES], server: *mut Server);
+    fn shs1_create_server_ack(ack: *mut [u8; SERVER_ACK_BYTES], server: *mut Server);
     fn shs1_server_outcome(outcome: *mut Outcome, server: *mut Server);
     fn shs1_server_clean(server: *mut Server);
 }
