@@ -2,6 +2,10 @@
 name = "secret_handshake"
 version = "0.1.0"
 authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
+description = "Implementation of the secret-handshake protocol."
+repository = "https://github.com/AljoschaMeyer/secret-handshake-rs"
+readme = "README.md"
+license = "GPL-3.0"
 
 [dependencies]
 sodiumoxide = "0.0.15"

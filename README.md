@@ -1,4 +1,11 @@
 # Secret-Handshake
-An implementation of the [secret-handshake](https://github.com/auditdrivencrypto/secret-handshake) protocol in rust.
 
-TODO Build instructions for the git submodule shs1-c.
+Rust wrapper around [shs1-c](https://github.com/auditdrivencrypto/secret-handshake).
+
+[API documentation](https://docs.rs/secret_handshake)
+
+### Building
+
+This module depends on [libsodium](https://github.com/jedisct1/libsodium).
+
+This also contains [shs1-c](https://github.com/auditdrivencrypto/secret-handshake) as a git submodule, so be sure to perform the right git magic when cloning, updating etc.
