@@ -42,8 +42,7 @@ impl<S: io::Read + io::Write> ClientHandshaker<S> {
         }
     }
 
-    /// Returns the current phase of the handshake. Useful to determine what happens
-    /// next, or when exactly an IO error occured.
+    /// Returns the current phase of the handshake.
     ///
     /// There is no state to mark a completed handshake. After `shake_hands` has
     /// returned an `Ok`, this method will continue to return
@@ -134,12 +133,11 @@ pub enum ClientResumeState {
     ReadServerAck,
 }
 
-/// An error that occured during the synchronous execution of a handshake.
+/// An error which occured during the synchronous execution of a handshake.
 ///
-/// `InvalidChallenge` and `InvalidAck`
-/// are fatal errors and return ownership of the inner stream. An `IoErr`
-/// contains a `ClientHandshaker` which can be used to resume the handshake at a
-/// later point if the wrapped IO error is non-fatal.
+/// `InvalidChallenge` and `InvalidAck` are fatal errors and return ownership of
+/// the inner stream. An `IoErr` contains a `ClientHandshaker` which can be used
+/// to resume the handshake at a later point if the wrapped IO error is non-fatal.
 #[derive(Debug)]
 pub enum ClientHandshakeError<S> {
     /// An IO error occured during reading or writing. If the error is not fatal,
@@ -179,14 +177,14 @@ impl<S: fmt::Debug> error::Error for ClientHandshakeError<S> {
     }
 }
 
-/// An error that occured during the asynchronous execution of a handshake.
+/// An error which occured during the asynchronous execution of a handshake.
 ///
 /// Unlike a simple `ClientHandshakeError`, all of these are considered fatal,
 /// the handshake can not be resumed.
 #[derive(Debug)]
 pub enum AsyncClientHandshakeError {
     /// An IO error occured during reading or writing. The contained error is
-    /// guaranteed not to have kind `WouldBlock`.
+    /// guaranteed to not have kind `WouldBlock`.
     IoErr(io::Error),
     /// Received an invalid challenge from the server.
     InvalidChallenge,
@@ -209,7 +207,7 @@ impl error::Error for AsyncClientHandshakeError {
         match *self {
             AsyncClientHandshakeError::IoErr(ref err) => err.description(),
             AsyncClientHandshakeError::InvalidChallenge => "received invalid challenge",
-            AsyncClientHandshakeError::InvalidAck => "received invalid authentication",
+            AsyncClientHandshakeError::InvalidAck => "received invalid acknowledgement",
         }
     }
 

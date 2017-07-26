@@ -7,7 +7,6 @@ use sodiumoxide::crypto::auth;
 use std::io::prelude::*;
 use std::io;
 use futures::Future;
-use futures::future::ok;
 use futures::{Poll, Async};
 use tokio_io::{AsyncRead, AsyncWrite};
 
@@ -389,12 +388,13 @@ fn run_server_handshake<S: Read + Write>(server: ServerHandshaker<S>) -> bool {
 quickcheck! {
         fn test_server_success_randomized(write_ops: PartialWithErrors<GenInterruptedWouldBlock>, read_ops: PartialWithErrors<GenInterruptedWouldBlock>) -> bool {
           let data = [
-          211,6,20,155,178,209,30,107,1,3,140,242,73,101,116,234,249,127,131,227,142,66,240,195,13,50,38,96,7,208,124,180,79,79,77,238,254,215,129,197,235,41,185,208,47,32,146,37,255,237,208,215,182,92,201,106,85,86,157,41,53,165,177,32, // end valid client challenge
-          80,34,24,195,46,211,235,66,91,89,65,98,137,26,86,197,32,4,153,142,160,18,56,180,12,171,127,38,44,53,74,64,55,188,22,25,161,25,7,243,200,196,145,249,207,211,88,178,0,206,173,234,188,20,251,240,199,169,94,180,212,32,150,226,138,44,141,235,33,152,91,215,31,126,48,48,220,239,97,225,103,79,190,56,227,103,142,195,124,10,21,76,66,11,194,11,220,15,163,66,138,232,228,12,130,172,4,137,52,159,64,98 // end valid client auth
+                211,6,20,155,178,209,30,107,1,3,140,242,73,101,116,234,249,127,131,227,142,66,240,195,13,50,38,96,7,208,124,180,79,79,77,238,254,215,129,197,235,41,185,208,47,32,146,37,255,237,208,215,182,92,201,106,85,86,157,41,53,165,177,32, // end valid client challenge
+                80,34,24,195,46,211,235,66,91,89,65,98,137,26,86,197,32,4,153,142,160,18,56,180,12,171,127,38,44,53,74,64,55,188,22,25,161,25,7,243,200,196,145,249,207,211,88,178,0,206,173,234,188,20,251,240,199,169,94,180,212,32,150,226,138,44,141,235,33,152,91,215,31,126,48,48,220,239,97,225,103,79,190,56,227,103,142,195,124,10,21,76,66,11,194,11,220,15,163,66,138,232,228,12,130,172,4,137,52,159,64,98 // end valid client auth
             ];
-          let stream = TestDuplex::new(&data);
+            let stream = TestDuplex::new(&data);
             let stream = PartialWrite::new(stream, write_ops);
             let stream = PartialRead::new(stream, read_ops);
+
             let server = ServerHandshaker::new(stream,
                                                &APP,
                                                &SERVER_PUB,
@@ -403,5 +403,32 @@ quickcheck! {
                                                &SERVER_EPH_SEC);
 
             return run_server_handshake(server);
+        }
+
+        fn test_server_success_randomized_async(write_ops: PartialWithErrors<GenWouldBlock>, read_ops: PartialWithErrors<GenWouldBlock>) -> bool {
+          let data = [
+                211,6,20,155,178,209,30,107,1,3,140,242,73,101,116,234,249,127,131,227,142,66,240,195,13,50,38,96,7,208,124,180,79,79,77,238,254,215,129,197,235,41,185,208,47,32,146,37,255,237,208,215,182,92,201,106,85,86,157,41,53,165,177,32, // end valid client challenge
+                80,34,24,195,46,211,235,66,91,89,65,98,137,26,86,197,32,4,153,142,160,18,56,180,12,171,127,38,44,53,74,64,55,188,22,25,161,25,7,243,200,196,145,249,207,211,88,178,0,206,173,234,188,20,251,240,199,169,94,180,212,32,150,226,138,44,141,235,33,152,91,215,31,126,48,48,220,239,97,225,103,79,190,56,227,103,142,195,124,10,21,76,66,11,194,11,220,15,163,66,138,232,228,12,130,172,4,137,52,159,64,98 // end valid client auth
+            ];
+            let stream = TestDuplex::new(&data);
+            let stream = PartialAsyncWrite::new(stream, write_ops);
+            let stream = PartialAsyncRead::new(stream, read_ops);
+
+            let server = ServerHandshaker::new(stream,
+                                               &APP,
+                                               &SERVER_PUB,
+                                               &SERVER_SEC,
+                                               &SERVER_EPH_PUB,
+                                               &SERVER_EPH_SEC);
+
+            let mut flag = true;
+            let outcome = server.wait().unwrap();
+
+            if outcome.encryption_key() != &EXP_SERVER_ENC_KEY {flag = false}
+            if outcome.encryption_nonce() != &EXP_SERVER_ENC_NONCE {flag = false}
+            if outcome.decryption_key() != &EXP_SERVER_DEC_KEY {flag = false}
+            if outcome.decryption_nonce() != &EXP_SERVER_DEC_NONCE {flag = false}
+
+            return flag;
         }
     }
