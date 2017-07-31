@@ -9,6 +9,7 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::auth;
 use futures::{Poll, Async, Future};
 use tokio_io::{AsyncRead, AsyncWrite};
+use box_stream::BoxDuplex;
 
 use crypto::*;
 
@@ -84,6 +85,13 @@ impl<S: io::Read + io::Write> ClientHandshaker<S> {
     /// progress, it can *not* be resumed later.
     pub fn into_inner(self) -> S {
         self.stream
+    }
+
+    /// Performs a handshake, then uses the negotiated data to create an
+    /// encrypted duplex stream.
+    pub fn negotiate_box_duplex(self) -> Result<BoxDuplex<S>, ClientHandshakeError<S>> {
+        let (outcome, stream) = self.shake_hands()?;
+        Ok(outcome.initialize_box_duplex(stream))
     }
 }
 

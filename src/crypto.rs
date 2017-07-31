@@ -1,13 +1,16 @@
 //! Low-level bindings to shs1-c. You probably don't need to use this
 //! module directly.
+
+use std::mem::uninitialized;
+use std::io;
+
 use sodiumoxide::crypto::box_;
 use sodiumoxide::crypto::hash::sha256;
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::scalarmult;
 use sodiumoxide::crypto::secretbox;
 use sodiumoxide::crypto::auth;
-
-use std::mem::uninitialized;
+use box_stream::BoxDuplex;
 
 /// Length of the client challenge in bytes.
 pub const CLIENT_CHALLENGE_BYTES: usize = 64;
@@ -60,6 +63,15 @@ impl Outcome {
     /// The negotiated initial nonce that should be used to decrypt messages from the peer.
     pub fn decryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
         &self.decryption_nonce
+    }
+
+    /// Given a duplex stream, create a `BoxDuplex` with the data of this `Outcome`.
+    pub fn initialize_box_duplex<S: io::Read + io::Write>(&self, stream: S) -> BoxDuplex<S> {
+        BoxDuplex::new(stream,
+                       secretbox::Key(*self.encryption_key()),
+                       secretbox::Key(*self.decryption_key()),
+                       secretbox::Nonce(*self.encryption_nonce()),
+                       secretbox::Nonce(*self.decryption_nonce()))
     }
 }
 

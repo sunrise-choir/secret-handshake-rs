@@ -1,6 +1,6 @@
 [package]
 name = "secret_handshake"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
 description = "Implementation of the secret-handshake protocol."
 repository = "https://github.com/AljoschaMeyer/secret-handshake-rs"
@@ -12,6 +12,7 @@ sodiumoxide = "0.0.15"
 libc = "0.2"
 futures = "0.1.14"
 tokio-io = "0.1.2"
+box_stream = "0.2.0"
 
 [dev-dependencies]
 partial-io = { version = "0.2.3", features = ["quickcheck", "tokio"] }
