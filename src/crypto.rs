@@ -32,6 +32,7 @@ pub struct Outcome {
     decryption_key: [u8; secretbox::KEYBYTES],
     decryption_nonce: [u8; secretbox::NONCEBYTES],
     padding_decryption: [u8; 8],
+    peer_longterm_pk: [u8; sign::PUBLICKEYBYTES],
 }
 
 /// Zero out all sensitive data when going out of scope
