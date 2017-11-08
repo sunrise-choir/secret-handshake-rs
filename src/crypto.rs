@@ -22,7 +22,8 @@ pub const CLIENT_AUTH_BYTES: usize = 112;
 pub const SERVER_ACK_BYTES: usize = 80;
 
 /// The data resulting from a handshake: Keys and nonces suitable for encrypted
-/// two-way communication with the peer via box-stream-rs.
+/// two-way communication with the peer via box-stream-rs, and the longterm
+/// public key of the peer.
 #[repr(C)]
 #[derive(Debug)]
 pub struct Outcome {
@@ -64,6 +65,11 @@ impl Outcome {
     /// The negotiated initial nonce that should be used to decrypt messages from the peer.
     pub fn decryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
         &self.decryption_nonce
+    }
+
+    /// The longterm public key of the peer.
+    pub fn peer_longterm_pk(&self) -> &[u8; sign::PUBLICKEYBYTES] {
+        &self.peer_longterm_pk
     }
 
     /// Given a duplex stream, create a `BoxDuplex` with the data of this `Outcome`.

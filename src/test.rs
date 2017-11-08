@@ -206,6 +206,7 @@ fn test_client_success_simple() {
     assert_eq!(outcome.encryption_nonce(), &EXP_CLIENT_ENC_NONCE);
     assert_eq!(outcome.decryption_key(), &EXP_CLIENT_DEC_KEY);
     assert_eq!(outcome.decryption_nonce(), &EXP_CLIENT_DEC_NONCE);
+    assert_eq!(outcome.peer_longterm_pk(), &SERVER_PUB);
 }
 
 fn run_client_handshake<S: Read + Write>(client: ClientHandshaker<S>) -> bool {
@@ -223,6 +224,7 @@ fn run_client_handshake<S: Read + Write>(client: ClientHandshaker<S>) -> bool {
             assert_eq!(outcome.encryption_nonce(), &EXP_CLIENT_ENC_NONCE);
             assert_eq!(outcome.decryption_key(), &EXP_CLIENT_DEC_KEY);
             assert_eq!(outcome.decryption_nonce(), &EXP_CLIENT_DEC_NONCE);
+            assert_eq!(outcome.peer_longterm_pk(), &SERVER_PUB);
             return true;
         }
     }
@@ -363,6 +365,7 @@ fn test_server_success_simple() {
     assert_eq!(outcome.encryption_nonce(), &EXP_SERVER_ENC_NONCE);
     assert_eq!(outcome.decryption_key(), &EXP_SERVER_DEC_KEY);
     assert_eq!(outcome.decryption_nonce(), &EXP_SERVER_DEC_NONCE);
+    assert_eq!(outcome.peer_longterm_pk(), &CLIENT_PUB);
 }
 
 fn run_server_handshake<S: Read + Write>(server: ServerHandshaker<S>) -> bool {
@@ -380,6 +383,7 @@ fn run_server_handshake<S: Read + Write>(server: ServerHandshaker<S>) -> bool {
             assert_eq!(outcome.encryption_nonce(), &EXP_SERVER_ENC_NONCE);
             assert_eq!(outcome.decryption_key(), &EXP_SERVER_DEC_KEY);
             assert_eq!(outcome.decryption_nonce(), &EXP_SERVER_DEC_NONCE);
+            assert_eq!(outcome.peer_longterm_pk(), &CLIENT_PUB);
             return true;
         }
     }
