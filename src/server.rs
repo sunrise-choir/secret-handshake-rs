@@ -1,7 +1,6 @@
 use std::{error, io, fmt};
 use std::error::Error;
 use std::mem::uninitialized;
-use std::marker::PhantomData;
 use std::fmt::Debug;
 
 use sodiumoxide::crypto::{box_, sign, auth};
@@ -10,16 +9,14 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 use crypto::*;
 
-/// Performs the server side of a handshake, holding state between different steps.
+/// Performs the server side of a handshake.
 pub struct ServerHandshaker<S, AuthFn, AsyncBool> {
     stream: Option<S>,
-    auth_fn: Option<AuthFn>,
-    auth_future: Option<AsyncBool>,
+    auth: Option<AuthStuff<AuthFn, AsyncBool>>,
     server: Server,
     state: State,
     data: [u8; MSG3_BYTES], // used to hold and cache the results of `server.create_server_challenge` and `server.create_server_ack`, and any data read from the client
     offset: usize, // offset into the data array at which to read/write
-    async_bool_type: PhantomData<AsyncBool>,
 }
 
 impl<S, AuthFn, AsyncBool> ServerHandshaker<S, AuthFn, AsyncBool>
@@ -43,8 +40,7 @@ impl<S, AuthFn, AsyncBool> ServerHandshaker<S, AuthFn, AsyncBool>
                -> ServerHandshaker<S, AuthFn, AsyncBool> {
         ServerHandshaker {
             stream: Some(stream),
-            auth_fn: Some(auth_fn),
-            auth_future: None,
+            auth: Some(AuthFun(auth_fn)),
             server: Server::new(network_identifier,
                                 server_longterm_pk,
                                 server_longterm_sk,
@@ -53,7 +49,6 @@ impl<S, AuthFn, AsyncBool> ServerHandshaker<S, AuthFn, AsyncBool>
             state: ReadMsg1,
             data: [0; MSG3_BYTES],
             offset: 0,
-            async_bool_type: PhantomData,
         }
     }
 }
@@ -156,14 +151,17 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                                 return Err(ServerHandshakeError::InvalidAuth(stream));
                             }
 
-                            let auth_fn =
-                                self.auth_fn
-                                    .take()
-                                    .expect("Attempted to poll ServerHandshaker after completion");
-                            self.auth_future =
-                                Some(auth_fn(&sign::PublicKey(unsafe {
+                            let auth_fn = match self.auth
+                                .take()
+                                .expect("Attempted to poll ServerHandshaker after completion") {
+                                    AuthFun(f) => f,
+                                    AuthFuture(_) => unreachable!()
+                                };
+
+                            self.auth =
+                                Some(AuthFuture(auth_fn(&sign::PublicKey(unsafe {
                                                              self.server.client_longterm_pub()
-                                                         })));
+                                                         }))));
                             self.state = AuthenticateClient;
 
                             self.stream = Some(stream);
@@ -174,14 +172,17 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
             }
             AuthenticateClient => {
                 let mut auth_future =
-                    self.auth_future
-                        .take()
-                        .expect("Attempted to poll ServerHandshaker after completion");
+                    match self.auth
+                              .take()
+                              .expect("Attempted to poll ServerHandshaker after completion") {
+                        AuthFun(_) => unreachable!(),
+                        AuthFuture(f) => f,
+                    };
 
                 match auth_future.poll() {
                     Err(e) => return Err(ServerHandshakeError::AuthFnErr(e, stream)),
                     Ok(Async::NotReady) => {
-                        self.auth_future = Some(auth_future);
+                        self.auth = Some(AuthFuture(auth_future));
                         return Ok(Async::NotReady);
                     }
                     Ok(Async::Ready(_)) => {
@@ -284,3 +285,9 @@ enum State {
     WriteMsg4,
 }
 use server::State::*;
+
+enum AuthStuff<AuthFn, AsyncBool> {
+    AuthFun(AuthFn),
+    AuthFuture(AsyncBool),
+}
+use server::AuthStuff::*;
