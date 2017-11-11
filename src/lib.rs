@@ -10,7 +10,6 @@ extern crate sodiumoxide;
 extern crate libc;
 extern crate futures;
 extern crate tokio_io;
-extern crate void;
 
 pub mod crypto;
 pub mod client;
