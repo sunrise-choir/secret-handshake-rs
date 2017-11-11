@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use sodiumoxide::crypto::{box_, sign, auth};
 use futures::{Poll, Async, Future};
 use tokio_io::{AsyncRead, AsyncWrite};
+use void::Void;
 
 use crypto::*;
 
@@ -28,6 +29,10 @@ impl<S, AuthFn, AsyncBool> ServerHandshaker<S, AuthFn, AsyncBool>
 {
     /// Creates a new ServerHandshaker to accept a connection from a client which
     /// knows the server's public key and uses the right app key over the given `stream`.
+    ///
+    /// Once the client has revealed its longterm public key, `auth_fn` is
+    /// invoked. If the returned `AsyncBool` resolves to `Ok(Async::Ready(false))`,
+    /// the handshake is aborted.
     ///
     /// This consumes ownership of the stream, so that no other reads/writes can
     /// interfere with the handshake. When the Future resolves, ownership of the
@@ -76,6 +81,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ServerHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -90,6 +96,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG1_BYTES])
                                                  }) {
+                                self.data = [0; MSG3_BYTES];
                                 return Err(ServerHandshakeError::InvalidMsg1(stream));
                             }
 
@@ -115,6 +122,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ServerHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -141,6 +149,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ServerHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -151,6 +160,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                             return self.poll();
                         } else {
                             if !self.server.verify_msg3(&self.data) {
+                                self.data = [0; MSG3_BYTES];
                                 return Err(ServerHandshakeError::InvalidMsg3(stream));
                             }
 
@@ -189,7 +199,12 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                         self.auth = Some(AuthFuture(auth_future));
                         return Ok(Async::NotReady);
                     }
-                    Ok(Async::Ready(_)) => {
+                    Ok(Async::Ready(is_authorized)) => {
+                        if !is_authorized {
+                            self.data = [0; MSG3_BYTES];
+                            return Err(ServerHandshakeError::UnauthorizedClient(stream));
+                        }
+
                         self.offset = 0;
                         self.state = WriteMsg4;
                         self.server
@@ -211,6 +226,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ServerHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -241,6 +257,8 @@ pub enum ServerHandshakeError<S, AuthErr> {
     /// An IO error occured during reading or writing. The contained error is
     /// guaranteed to not have kind `WouldBlock`.
     IoErr(io::Error, S),
+    /// The authentication function resolved to false.
+    UnauthorizedClient(S),
     /// The authentication function errored, the error is wrapped in this variant.
     AuthFnErr(AuthErr, S),
     /// Received invalid msg1 from the client.
@@ -263,15 +281,17 @@ impl<S: Debug, AuthErr: error::Error> error::Error for ServerHandshakeError<S, A
     fn description(&self) -> &str {
         match *self {
             ServerHandshakeError::IoErr(ref err, _) => "IO error during handshake",
+            ServerHandshakeError::UnauthorizedClient(_) => "Rejected client based on its longterm public key",
             ServerHandshakeError::AuthFnErr(ref err, _) => "Error during authentication",
-            ServerHandshakeError::InvalidMsg1(_) => "received invalid msg1",
-            ServerHandshakeError::InvalidMsg3(_) => "received invalid msg3",
+            ServerHandshakeError::InvalidMsg1(_) => "Received invalid msg1",
+            ServerHandshakeError::InvalidMsg3(_) => "Received invalid msg3",
         }
     }
 
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             ServerHandshakeError::IoErr(ref err, _) => Some(err),
+            ServerHandshakeError::UnauthorizedClient(_) => None,
             ServerHandshakeError::AuthFnErr(ref err, _) => Some(err),
             ServerHandshakeError::InvalidMsg1(_) => None,
             ServerHandshakeError::InvalidMsg3(_) => None,
@@ -294,3 +314,8 @@ enum AuthStuff<AuthFn, AsyncBool> {
     AuthFuture(AsyncBool),
 }
 use server::AuthStuff::*;
+
+// /// A ServerHandshaker that accepts all well-behaved clients. This is just a
+// /// regular ServerHandshaker with an authentication function that always returns
+// /// true.
+// pub struct ServerHandshakerNoAuth<S>(ServerHandshaker<S>);
