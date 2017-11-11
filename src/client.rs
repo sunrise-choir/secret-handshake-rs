@@ -71,6 +71,7 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ClientHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -97,6 +98,7 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ClientHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -111,6 +113,7 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG2_BYTES])
                                                  }) {
+                                self.data = [0; MSG3_BYTES];
                                 return Err(ClientHandshakeError::InvalidMsg2(stream));
                             }
 
@@ -132,6 +135,7 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ClientHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -158,6 +162,7 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
+                            self.data = [0; MSG3_BYTES];
                             return Err(ClientHandshakeError::IoErr(e, stream));
                         }
                     }
@@ -172,6 +177,7 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG4_BYTES])
                                                  }) {
+                                self.data = [0; MSG3_BYTES];
                                 return Err(ClientHandshakeError::InvalidMsg4(stream));
                             }
 
@@ -215,8 +221,8 @@ impl<S: Debug> error::Error for ClientHandshakeError<S> {
     fn description(&self) -> &str {
         match *self {
             ClientHandshakeError::IoErr(ref err, _) => "IO error during handshake",
-            ClientHandshakeError::InvalidMsg2(_) => "received invalid msg2",
-            ClientHandshakeError::InvalidMsg4(_) => "received invalid msg4",
+            ClientHandshakeError::InvalidMsg2(_) => "Received invalid msg2",
+            ClientHandshakeError::InvalidMsg4(_) => "Received invalid msg4",
         }
     }
 
