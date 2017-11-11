@@ -1,3 +1,5 @@
+//! Asynchronously accept handshakes.
+
 use std::{error, io, fmt};
 use std::error::Error;
 use std::mem::uninitialized;

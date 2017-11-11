@@ -1,10 +1,11 @@
+//! Asynchronously initiate handshakes.
+
 use std::{error, io, fmt};
 use std::error::Error;
 use std::mem::uninitialized;
-use std::marker::PhantomData;
 use std::fmt::Debug;
 
-use sodiumoxide::crypto::{box_, sign, auth};
+use sodiumoxide::crypto::{box_, sign};
 use futures::{Poll, Async, Future};
 use tokio_io::{AsyncRead, AsyncWrite};
 

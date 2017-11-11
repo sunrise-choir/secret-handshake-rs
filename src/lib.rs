@@ -1,7 +1,11 @@
-//! An implementation of the [secret-handshake](https://github.com/auditdrivencrypto/secret-handshake) protocol version 1.
-//! Also provides convenient functions to create [box-streams](https://docs.rs/box_stream) from the outcome of a handshake.
+//! Implementation of the [secret-handshake](https://github.com/auditdrivencrypto/secret-handshake)
+//! protocol.
+//!
+//! This library uses libsodium internally. In application code, call
+//! [`sodiumoxide::init()`](https://dnaq.github.io/sodiumoxide/sodiumoxide/fn.init.html)
+//! before performing any handshakes.
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 extern crate sodiumoxide;
 extern crate libc;
 extern crate futures;
