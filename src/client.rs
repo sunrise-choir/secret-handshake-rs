@@ -9,7 +9,6 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::auth;
 use futures::{Poll, Async, Future};
 use tokio_io::{AsyncRead, AsyncWrite};
-use box_stream::BoxDuplex;
 
 use crypto::*;
 
@@ -85,13 +84,6 @@ impl<S: io::Read + io::Write> ClientHandshaker<S> {
     /// progress, it can *not* be resumed later.
     pub fn into_inner(self) -> S {
         self.stream
-    }
-
-    /// Performs a handshake, then uses the negotiated data to create an
-    /// encrypted duplex stream.
-    pub fn negotiate_box_duplex(self) -> Result<BoxDuplex<S>, ClientHandshakeError<S>> {
-        let (outcome, stream) = self.shake_hands()?;
-        Ok(outcome.initialize_box_duplex(stream))
     }
 }
 
@@ -237,7 +229,7 @@ use self::AsyncClientHandshakeError as HandshakeError;
 struct HandshakeState {
     client: Client,
     state: ClientResumeState,
-    data: [u8; CLIENT_AUTH_BYTES], // used to hold and cache the results of `client.create_client_challenge` and `client.create_client_auth`, and any data read from the server
+    data: [u8; MSG3_BYTES], // used to hold and cache the results of `client.create_client_challenge` and `client.create_client_auth`, and any data read from the server
     offset: usize, // offset into the data array at which to read/write
 }
 
@@ -252,15 +244,14 @@ impl HandshakeState {
         let mut ret = HandshakeState {
             client: Client::new(app, pub_, sec, eph_pub, eph_sec, server_pub),
             state: ClientResumeState::WriteClientChallenge,
-            data: [0; CLIENT_AUTH_BYTES],
+            data: [0; MSG3_BYTES],
             offset: 0,
         };
 
         ret.client
-            .create_client_challenge(unsafe {
-                                         &mut *(&mut ret.data as *mut [u8; CLIENT_AUTH_BYTES] as
-                                                *mut [u8; CLIENT_CHALLENGE_BYTES])
-                                     });
+            .create_msg1(unsafe {
+                             &mut *(&mut ret.data as *mut [u8; MSG3_BYTES] as *mut [u8; MSG1_BYTES])
+                         });
 
         ret
     }
@@ -275,8 +266,8 @@ impl HandshakeState {
                                             -> Result<Outcome, HandshakeError> {
         match self.state {
             ClientResumeState::WriteClientChallenge => {
-                while self.offset < CLIENT_CHALLENGE_BYTES {
-                    match stream.write(&self.data[self.offset..CLIENT_CHALLENGE_BYTES]) {
+                while self.offset < MSG1_BYTES {
+                    match stream.write(&self.data[self.offset..MSG1_BYTES]) {
                         Ok(written) => self.offset += written,
                         Err(e) => {
                             return Err(HandshakeError::IoErr(e));
@@ -290,8 +281,8 @@ impl HandshakeState {
             }
 
             ClientResumeState::ReadServerChallenge => {
-                while self.offset < SERVER_CHALLENGE_BYTES {
-                    match stream.read(&mut self.data[self.offset..SERVER_CHALLENGE_BYTES]) {
+                while self.offset < MSG2_BYTES {
+                    match stream.read(&mut self.data[self.offset..MSG2_BYTES]) {
                         Ok(read) => self.offset += read,
                         Err(e) => {
                             return Err(HandshakeError::IoErr(e));
@@ -300,23 +291,22 @@ impl HandshakeState {
                 }
 
                 if !self.client
-                        .verify_server_challenge(unsafe {
-                                                     &*(&self.data as
-                                                        *const [u8; CLIENT_AUTH_BYTES] as
-                                                        *const [u8; SERVER_CHALLENGE_BYTES])
-                                                 }) {
+                        .verify_msg2(unsafe {
+                                         &*(&self.data as *const [u8; MSG3_BYTES] as
+                                            *const [u8; MSG2_BYTES])
+                                     }) {
                     return Err(HandshakeError::InvalidChallenge);
                 }
 
                 self.offset = 0;
                 self.state = ClientResumeState::WriteClientAuth;
-                self.client.create_client_auth(&mut self.data);
+                self.client.create_msg3(&mut self.data);
                 return self.shake_hands(stream);
             }
 
             ClientResumeState::WriteClientAuth => {
-                while self.offset < CLIENT_AUTH_BYTES {
-                    match stream.write(&self.data[self.offset..CLIENT_AUTH_BYTES]) {
+                while self.offset < MSG3_BYTES {
+                    match stream.write(&self.data[self.offset..MSG3_BYTES]) {
                         Ok(written) => self.offset += written,
                         Err(e) => {
                             return Err(HandshakeError::IoErr(e));
@@ -330,8 +320,8 @@ impl HandshakeState {
             }
 
             ClientResumeState::ReadServerAck => {
-                while self.offset < SERVER_ACK_BYTES {
-                    match stream.read(&mut self.data[self.offset..SERVER_ACK_BYTES]) {
+                while self.offset < MSG4_BYTES {
+                    match stream.read(&mut self.data[self.offset..MSG4_BYTES]) {
                         Ok(read) => self.offset += read,
                         Err(e) => {
                             return Err(HandshakeError::IoErr(e));
@@ -340,16 +330,16 @@ impl HandshakeState {
                 }
 
                 if !self.client
-                        .verify_server_ack(unsafe {
-                                               &*(&self.data as *const [u8; CLIENT_AUTH_BYTES] as
-                                                  *const [u8; SERVER_ACK_BYTES])
-                                           }) {
+                        .verify_msg4(unsafe {
+                                         &*(&self.data as *const [u8; MSG3_BYTES] as
+                                            *const [u8; MSG4_BYTES])
+                                     }) {
                     return Err(HandshakeError::InvalidAck);
                 }
 
                 let mut outcome = unsafe { uninitialized() };
                 self.client.outcome(&mut outcome);
-                self.data = [0; CLIENT_AUTH_BYTES];
+                self.data = [0; MSG3_BYTES];
                 return Ok(outcome);
             }
         }

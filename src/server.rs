@@ -1,154 +1,250 @@
-use std::error;
+use std::{error, io, fmt};
 use std::error::Error;
-use std::io;
-use std::fmt;
 use std::mem::uninitialized;
+use std::marker::PhantomData;
+use std::fmt::Debug;
 
-use sodiumoxide::crypto::box_;
-use sodiumoxide::crypto::sign;
-use sodiumoxide::crypto::auth;
+use sodiumoxide::crypto::{box_, sign, auth};
 use futures::{Poll, Async, Future};
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use crypto::*;
 
 /// Performs the server side of a handshake, holding state between different steps.
-///
-/// The API utilizes ownership to ensure that the communication stream with the
-/// peer can not be used during the handshake. Ownership of the stream is
-/// returned when the handshake terminates (either successfully or via an error).
-///
-/// `ServerHandshaker` also implements the `Future` trait, which provides a
-/// simpler interface hiding the ownership details.
-pub struct ServerHandshaker<S> {
-    stream: S,
-    state: HandshakeState,
+pub struct ServerHandshaker<S, AuthFn, AsyncBool> {
+    stream: Option<S>,
+    auth_fn: Option<AuthFn>,
+    auth_future: Option<AsyncBool>,
+    server: Server,
+    state: State,
+    data: [u8; MSG3_BYTES], // used to hold and cache the results of `server.create_server_challenge` and `server.create_server_ack`, and any data read from the client
+    offset: usize, // offset into the data array at which to read/write
+    async_bool_type: PhantomData<AsyncBool>,
 }
 
-impl<S: io::Read + io::Write> ServerHandshaker<S> {
-    /// Creates a new ServerHandshaker to accept connections from a client which
-    /// knows the server's public key and use the right app key over the given `stream`.
+impl<S, AuthFn, AsyncBool> ServerHandshaker<S, AuthFn, AsyncBool>
+    where S: AsyncRead + AsyncWrite,
+          AuthFn: FnOnce(&sign::PublicKey) -> AsyncBool,
+          AsyncBool: Future<Item = bool>
+{
+    /// Creates a new ServerHandshaker to accept a connection from a client which
+    /// knows the server's public key and uses the right app key over the given `stream`.
+    ///
+    /// This consumes ownership of the stream, so that no other reads/writes can
+    /// interfere with the handshake. When the Future resolves, ownership of the
+    /// stream is returned as well.
     pub fn new(stream: S,
-               app: &[u8; auth::KEYBYTES],
-               pub_: &[u8; sign::PUBLICKEYBYTES],
-               sec: &[u8; sign::SECRETKEYBYTES],
-               eph_pub: &[u8; box_::PUBLICKEYBYTES],
-               eph_sec: &[u8; box_::SECRETKEYBYTES])
-               -> ServerHandshaker<S> {
+               auth_fn: AuthFn,
+               network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
+               server_longterm_pk: &[u8; sign::PUBLICKEYBYTES],
+               server_longterm_sk: &[u8; sign::SECRETKEYBYTES],
+               server_ephemeral_pk: &[u8; box_::PUBLICKEYBYTES],
+               server_ephemeral_sk: &[u8; box_::SECRETKEYBYTES])
+               -> ServerHandshaker<S, AuthFn, AsyncBool> {
         ServerHandshaker {
-            stream,
-            state: HandshakeState::new(app, pub_, sec, eph_pub, eph_sec),
+            stream: Some(stream),
+            auth_fn: Some(auth_fn),
+            auth_future: None,
+            server: Server::new(network_identifier,
+                                server_longterm_pk,
+                                server_longterm_sk,
+                                server_ephemeral_pk,
+                                server_ephemeral_sk),
+            state: ReadMsg1,
+            data: [0; MSG3_BYTES],
+            offset: 0,
+            async_bool_type: PhantomData,
         }
-    }
-
-    /// Returns the current phase of the handshake.
-    ///
-    /// There is no state to mark a completed handshake. After `shake_hands` has
-    /// returned an `Ok`, this method will continue to return
-    /// `ServerResumeState::WriteServerAck`.
-    pub fn get_resume_state(&self) -> ServerResumeState {
-        self.state.get_resume_state()
-    }
-
-    /// Performs the handshake, using the inner duplex stream to negotiate
-    /// an `Outcome`.
-    ///
-    /// Ift he handshake succeeds, this returns both an outcome and ownership
-    /// of the inner stream. If the client sends invalid data, the handshake
-    /// is aborted and ownership of the stream is returned in the `ServerHandshakeError`
-    /// variant. If an IO error occurs, the wrapped error contains another owned
-    /// ServerHandshaker which can be used to resume the handshake if the IO
-    /// error was non-fatal. In case of a fatal IO error,
-    /// `ServerHandshaker.into_inner()` can be used to retrieve the stream.
-    pub fn shake_hands(mut self) -> Result<(Outcome, S), ServerHandshakeError<S>> {
-        match self.state.shake_hands(&mut self.stream) {
-            Ok(outcome) => Ok((outcome, self.stream)),
-            Err(e) => {
-                match e {
-                    HandshakeError::IoErr(inner_err) => {
-                        Err(ServerHandshakeError::IoErr(inner_err, self))
-                    }
-                    HandshakeError::InvalidChallenge => {
-                        Err(ServerHandshakeError::InvalidChallenge(self.stream))
-                    }
-                    HandshakeError::InvalidAuth => {
-                        Err(ServerHandshakeError::InvalidAuth(self.stream))
-                    }
-                }
-            }
-        }
-    }
-
-    /// Get back ownership of the inner stream. If a handshake has been in
-    /// progress, it can *not* be resumed later.
-    pub fn into_inner(self) -> S {
-        self.stream
     }
 }
 
-/// Future implementation to asynchronously drive a handshake.
-impl<S: AsyncRead + AsyncWrite> Future for ServerHandshaker<S> {
-    type Item = Outcome;
-    type Error = AsyncServerHandshakeError;
+impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
+    where S: AsyncRead + AsyncWrite,
+          AuthFn: FnOnce(&sign::PublicKey) -> AsyncBool,
+          AsyncBool: Future<Item = bool>
+{
+    type Item = (Outcome, S);
+    type Error = ServerHandshakeError<S, AsyncBool::Error>;
 
-    fn poll(&mut self) -> Poll<Outcome, AsyncServerHandshakeError> {
-        match self.state.shake_hands(&mut self.stream) {
-            Ok(outcome) => Ok(Async::Ready(outcome)),
-            Err(e) => {
-                match e {
-                    AsyncServerHandshakeError::IoErr(inner_err) => {
-                        if inner_err.kind() == io::ErrorKind::WouldBlock {
-                            Ok(Async::NotReady)
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let mut stream = self.stream
+            .take()
+            .expect("Attempted to poll ServerHandshaker after completion");
+        match self.state {
+            ReadMsg1 => {
+                match stream.read(&mut self.data[self.offset..MSG1_BYTES]) {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
                         } else {
-                            Err(AsyncServerHandshakeError::IoErr(inner_err))
+                            return Err(ServerHandshakeError::IoErr(e, stream));
                         }
                     }
-                    _ => Err(e),
+                    Ok(read) => {
+                        self.offset += read;
+                        if self.offset < MSG1_BYTES {
+                            self.stream = Some(stream);
+                            return self.poll();
+                        } else {
+                            if !self.server
+                                    .verify_msg1(unsafe {
+                                                     &*(&self.data as *const [u8; MSG3_BYTES] as
+                                                        *const [u8; MSG1_BYTES])
+                                                 }) {
+                                return Err(ServerHandshakeError::InvalidChallenge(stream));
+                            }
+
+                            self.offset = 0;
+                            self.state = WriteMsg2;
+                            self.server
+                                .create_msg2(unsafe {
+                                                 &mut *(&mut self.data as *mut [u8; MSG3_BYTES] as
+                                                        *mut [u8; MSG2_BYTES])
+                                             });
+
+                            self.stream = Some(stream);
+                            return self.poll();
+                        }
+                    }
                 }
             }
+
+            WriteMsg2 => {
+                match stream.write(&self.data[self.offset..MSG2_BYTES]) {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
+                        } else {
+                            return Err(ServerHandshakeError::IoErr(e, stream));
+                        }
+                    }
+                    Ok(written) => {
+                        self.offset += written;
+                        if self.offset < MSG2_BYTES {
+                            self.stream = Some(stream);
+                            return self.poll();
+                        } else {
+                            self.offset = 0;
+                            self.state = ReadMsg3;
+
+                            self.stream = Some(stream);
+                            return self.poll();
+                        }
+                    }
+                }
+            }
+
+            ReadMsg3 => {
+                match stream.read(&mut self.data[self.offset..MSG3_BYTES]) {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
+                        } else {
+                            return Err(ServerHandshakeError::IoErr(e, stream));
+                        }
+                    }
+                    Ok(read) => {
+                        self.offset += read;
+                        if self.offset < MSG3_BYTES {
+                            self.stream = Some(stream);
+                            return self.poll();
+                        } else {
+                            if !self.server.verify_msg3(&self.data) {
+                                return Err(ServerHandshakeError::InvalidAuth(stream));
+                            }
+
+                            let auth_fn =
+                                self.auth_fn
+                                    .take()
+                                    .expect("Attempted to poll ServerHandshaker after completion");
+                            self.auth_future =
+                                Some(auth_fn(&sign::PublicKey(unsafe {
+                                                             self.server.client_longterm_pub()
+                                                         })));
+                            self.state = AuthenticateClient;
+
+                            self.stream = Some(stream);
+                            return self.poll();
+                        }
+                    }
+                }
+            }
+            AuthenticateClient => {
+                let mut auth_future =
+                    self.auth_future
+                        .take()
+                        .expect("Attempted to poll ServerHandshaker after completion");
+
+                match auth_future.poll() {
+                    Err(e) => return Err(ServerHandshakeError::AuthFnErr(e, stream)),
+                    Ok(Async::NotReady) => {
+                        self.auth_future = Some(auth_future);
+                        return Ok(Async::NotReady);
+                    }
+                    Ok(Async::Ready(_)) => {
+                        self.offset = 0;
+                        self.state = WriteMsg4;
+                        self.server
+                            .create_msg4(unsafe {
+                                             &mut *(&mut self.data as *mut [u8; MSG3_BYTES] as
+                                                    *mut [u8; MSG4_BYTES])
+                                         });
+
+                        self.stream = Some(stream);
+                        return self.poll();
+                    }
+                }
+            }
+
+            WriteMsg4 => {
+                match stream.write(&self.data[self.offset..MSG4_BYTES]) {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
+                        } else {
+                            return Err(ServerHandshakeError::IoErr(e, stream));
+                        }
+                    }
+                    Ok(written) => {
+                        self.offset += written;
+                        if self.offset < MSG4_BYTES {
+                            self.stream = Some(stream);
+                            return self.poll();
+                        } else {
+                            let mut outcome = unsafe { uninitialized() };
+                            self.server.outcome(&mut outcome);
+                            self.data = [0; MSG3_BYTES];
+                            return Ok(Async::Ready((outcome, stream)));
+                        }
+                    }
+                }
+            }
+
         }
     }
 }
 
-impl<S> fmt::Debug for ServerHandshaker<S> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "ServerHandshaker {{state: {:?}}}", self.state.state)
-    }
-}
-
-/// Indicates where a ServerHandshaker will resume a partial handshake.
+/// A fatal error that occured during the asynchronous execution of a handshake.
 ///
-/// This should mostly be interesting for diagnostic purposes. The implementation
-/// details that need to be aware of the current state are hidden.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ServerResumeState {
-    /// Read the client challenge, then validate it.
-    ReadClientChallenge,
-    /// Write the server challenge to the client.
-    WriteServerChallenge,
-    /// Read the client authentication, then validate it.
-    ReadClientAuth,
-    /// Write the server acknowledgement to the client and end the handshake.
-    WriteServerAck,
-}
-
-/// An error which occured during the handshake.
-///
-/// `InvalidChallenge` and `InvalidAuth` are fatal errors and return ownership of
-/// the inner stream. An `IoErr` contains a `ServerHandshaker` which can be used
-/// to resume the handshake at a later point if the wrapped IO error is non-fatal.
+/// All variants return ownership of the inner stream.
 #[derive(Debug)]
-pub enum ServerHandshakeError<S> {
-    /// An IO error occured during reading or writing. If the error is not fatal,
-    /// you can simply call `shake_hands` on the contained client again.
-    IoErr(io::Error, ServerHandshaker<S>),
+pub enum ServerHandshakeError<S, AuthErr> {
+    /// An IO error occured during reading or writing. The contained error is
+    /// guaranteed to not have kind `WouldBlock`.
+    IoErr(io::Error, S),
+    /// The authentication function errored, the error is wrapped in this variant.
+    AuthFnErr(AuthErr, S),
     /// Received an invalid challenge from the client.
     InvalidChallenge(S),
     /// Received invalid authentication from the client.
     InvalidAuth(S),
 }
 
-impl<S: fmt::Debug> fmt::Display for ServerHandshakeError<S> {
+impl<S: Debug, AuthErr: error::Error> fmt::Display for ServerHandshakeError<S, AuthErr> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         try!(fmt.write_str(self.description()));
         if let Some(cause) = self.cause() {
@@ -158,10 +254,11 @@ impl<S: fmt::Debug> fmt::Display for ServerHandshakeError<S> {
     }
 }
 
-impl<S: fmt::Debug> error::Error for ServerHandshakeError<S> {
+impl<S: Debug, AuthErr: error::Error> error::Error for ServerHandshakeError<S, AuthErr> {
     fn description(&self) -> &str {
         match *self {
-            ServerHandshakeError::IoErr(ref err, _) => err.description(),
+            ServerHandshakeError::IoErr(ref err, _) => "IO error during handshake",
+            ServerHandshakeError::AuthFnErr(ref err, _) => "Error during authentication",
             ServerHandshakeError::InvalidChallenge(_) => "received invalid challenge",
             ServerHandshakeError::InvalidAuth(_) => "received invalid authentication",
         }
@@ -170,172 +267,20 @@ impl<S: fmt::Debug> error::Error for ServerHandshakeError<S> {
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             ServerHandshakeError::IoErr(ref err, _) => Some(err),
+            ServerHandshakeError::AuthFnErr(ref err, _) => Some(err),
             ServerHandshakeError::InvalidChallenge(_) => None,
             ServerHandshakeError::InvalidAuth(_) => None,
         }
     }
 }
 
-/// An error which occured during the asynchronous execution of a handshake.
-///
-/// Unlike a simple `ServerHandshakeError`, all of these are considered fatal,
-/// the handshake can not be resumed.
+// State for the future state machine.
 #[derive(Debug)]
-pub enum AsyncServerHandshakeError {
-    /// An IO error occured during reading or writing. The contained error is
-    /// guaranteed to not have kind `WouldBlock`.
-    IoErr(io::Error),
-    /// Received an invalid challenge from the client.
-    InvalidChallenge,
-    /// Received invalid authentication from the client.
-    InvalidAuth,
+enum State {
+    ReadMsg1,
+    WriteMsg2,
+    ReadMsg3,
+    AuthenticateClient,
+    WriteMsg4,
 }
-
-impl fmt::Display for AsyncServerHandshakeError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        try!(fmt.write_str(self.description()));
-        if let Some(cause) = self.cause() {
-            try!(write!(fmt, ": {}", cause));
-        }
-        Ok(())
-    }
-}
-
-impl error::Error for AsyncServerHandshakeError {
-    fn description(&self) -> &str {
-        match *self {
-            AsyncServerHandshakeError::IoErr(ref err) => err.description(),
-            AsyncServerHandshakeError::InvalidChallenge => "received invalid challenge",
-            AsyncServerHandshakeError::InvalidAuth => "received invalid authentication",
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            AsyncServerHandshakeError::IoErr(ref err) => Some(err),
-            AsyncServerHandshakeError::InvalidChallenge => None,
-            AsyncServerHandshakeError::InvalidAuth => None,
-        }
-    }
-}
-
-use self::AsyncServerHandshakeError as HandshakeError;
-
-////////////////////////////////////
-/// begin implementation details ///
-////////////////////////////////////
-
-struct HandshakeState {
-    server: Server,
-    state: ServerResumeState,
-    data: [u8; CLIENT_AUTH_BYTES], // used to hold and cache the results of `server.create_server_challenge` and `server.create_server_ack`, and any data read from the client
-    offset: usize, // offset into the data array at which to read/write
-}
-
-impl HandshakeState {
-    fn new(app: &[u8; auth::KEYBYTES],
-           pub_: &[u8; sign::PUBLICKEYBYTES],
-           sec: &[u8; sign::SECRETKEYBYTES],
-           eph_pub: &[u8; box_::PUBLICKEYBYTES],
-           eph_sec: &[u8; box_::SECRETKEYBYTES])
-           -> HandshakeState {
-        HandshakeState {
-            server: Server::new(app, pub_, sec, eph_pub, eph_sec),
-            state: ServerResumeState::ReadClientChallenge,
-            data: [0; CLIENT_AUTH_BYTES],
-            offset: 0,
-        }
-    }
-
-    fn get_resume_state(&self) -> ServerResumeState {
-        self.state
-    }
-
-    // Advances through the handshake state machine.
-    fn shake_hands<S: io::Read + io::Write>(&mut self,
-                                            stream: &mut S)
-                                            -> Result<Outcome, HandshakeError> {
-
-        match self.state {
-            ServerResumeState::ReadClientChallenge => {
-                while self.offset < CLIENT_CHALLENGE_BYTES {
-                    match stream.read(&mut self.data[self.offset..CLIENT_CHALLENGE_BYTES]) {
-                        Ok(read) => self.offset += read,
-                        Err(e) => {
-                            return Err(HandshakeError::IoErr(e));
-                        }
-                    }
-                }
-
-                if !self.server
-                        .verify_client_challenge(unsafe {
-                                                     &*(&self.data as
-                                                        *const [u8; CLIENT_AUTH_BYTES] as
-                                                        *const [u8; CLIENT_CHALLENGE_BYTES])
-                                                 }) {
-                    return Err(HandshakeError::InvalidChallenge);
-                }
-
-                self.offset = 0;
-                self.state = ServerResumeState::WriteServerChallenge;
-                self.server
-                    .create_server_challenge(unsafe {
-                                                 &mut *(&mut self.data as
-                                                        *mut [u8; CLIENT_AUTH_BYTES] as
-                                                        *mut [u8; SERVER_CHALLENGE_BYTES])
-                                             });
-                return self.shake_hands(stream);
-            }
-
-            ServerResumeState::WriteServerChallenge => {
-                while self.offset < SERVER_CHALLENGE_BYTES {
-                    match stream.write(&self.data[self.offset..SERVER_CHALLENGE_BYTES]) {
-                        Ok(written) => self.offset += written,
-                        Err(e) => {
-                            return Err(HandshakeError::IoErr(e));
-                        }
-                    }
-                }
-
-                self.offset = 0;
-                self.state = ServerResumeState::ReadClientAuth;
-                return self.shake_hands(stream);
-            }
-
-            ServerResumeState::ReadClientAuth => {
-                while self.offset < CLIENT_AUTH_BYTES {
-                    match stream.read(&mut self.data[self.offset..CLIENT_AUTH_BYTES]) {
-                        Ok(read) => self.offset += read,
-                        Err(e) => {
-                            return Err(HandshakeError::IoErr(e));
-                        }
-                    }
-                }
-
-                if !self.server.verify_client_auth(&self.data) {
-                    return Err(HandshakeError::InvalidAuth);
-                }
-
-                self.offset = 0;
-                self.state = ServerResumeState::WriteServerAck;
-                return self.shake_hands(stream);
-            }
-
-            ServerResumeState::WriteServerAck => {
-                while self.offset < SERVER_ACK_BYTES {
-                    match stream.write(&self.data[self.offset..SERVER_ACK_BYTES]) {
-                        Ok(written) => self.offset += written,
-                        Err(e) => {
-                            return Err(HandshakeError::IoErr(e));
-                        }
-                    }
-                }
-
-                let mut outcome = unsafe { uninitialized() };
-                self.server.outcome(&mut outcome);
-                self.data = [0; CLIENT_AUTH_BYTES];
-                return Ok(outcome);
-            }
-        }
-    }
-}
+use server::State::*;

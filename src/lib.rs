@@ -6,14 +6,11 @@ extern crate sodiumoxide;
 extern crate libc;
 extern crate futures;
 extern crate tokio_io;
-extern crate box_stream;
 
 pub mod crypto;
-mod client;
-mod server;
+pub mod client;
+pub mod server;
 
-pub use client::*;
-pub use server::*;
 pub use crypto::Outcome;
 
 #[cfg(test)]

@@ -10,16 +10,18 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::scalarmult;
 use sodiumoxide::crypto::secretbox;
 use sodiumoxide::crypto::auth;
-use box_stream::BoxDuplex;
 
-/// Length of the client challenge in bytes.
-pub const CLIENT_CHALLENGE_BYTES: usize = 64;
-/// Length of the server challenge in bytes.
-pub const SERVER_CHALLENGE_BYTES: usize = 64;
-/// Length of the client authentication in bytes.
-pub const CLIENT_AUTH_BYTES: usize = 112;
-/// Length of the server acknowledgement in bytes.
-pub const SERVER_ACK_BYTES: usize = 80;
+/// Length of a network identifier in bytes.
+pub const NETWORK_IDENTIFIER_BYTES: usize = 32;
+
+/// Length of msg1 in bytes.
+pub const MSG1_BYTES: usize = 64;
+/// Length of msg2 in bytes.
+pub const MSG2_BYTES: usize = 64;
+/// Length of msg3 in bytes.
+pub const MSG3_BYTES: usize = 112;
+/// Length of msg4 in bytes.
+pub const MSG4_BYTES: usize = 80;
 
 /// The data resulting from a handshake: Keys and nonces suitable for encrypted
 /// two-way communication with the peer via box-stream-rs, and the longterm
@@ -71,15 +73,6 @@ impl Outcome {
     pub fn peer_longterm_pk(&self) -> &[u8; sign::PUBLICKEYBYTES] {
         &self.peer_longterm_pk
     }
-
-    /// Given a duplex stream, create a `BoxDuplex` with the data of this `Outcome`.
-    pub fn initialize_box_duplex<S: io::Read + io::Write>(&self, stream: S) -> BoxDuplex<S> {
-        BoxDuplex::new(stream,
-                       secretbox::Key(*self.encryption_key()),
-                       secretbox::Key(*self.decryption_key()),
-                       secretbox::Nonce(*self.encryption_nonce()),
-                       secretbox::Nonce(*self.decryption_nonce()))
-    }
 }
 
 /// The struct used in the C code to perform the client side of a handshake.
@@ -126,22 +119,22 @@ impl Client {
     }
 
     /// Writes the client challenge into `challenge` and updates the client state.
-    pub fn create_client_challenge(&mut self, challenge: &mut [u8; CLIENT_CHALLENGE_BYTES]) {
+    pub fn create_msg1(&mut self, challenge: &mut [u8; MSG1_BYTES]) {
         unsafe { shs1_create_client_challenge(challenge, self) }
     }
 
     /// Verifies the given server `challenge` and updates the client state.
-    pub fn verify_server_challenge(&mut self, challenge: &[u8; CLIENT_CHALLENGE_BYTES]) -> bool {
+    pub fn verify_msg2(&mut self, challenge: &[u8; MSG1_BYTES]) -> bool {
         unsafe { shs1_verify_server_challenge(challenge, self) }
     }
 
     /// Writes the client authentication into `auth` and updates the client state.
-    pub fn create_client_auth(&mut self, auth: &mut [u8; CLIENT_AUTH_BYTES]) -> i32 {
+    pub fn create_msg3(&mut self, auth: &mut [u8; MSG3_BYTES]) -> i32 {
         unsafe { shs1_create_client_auth(auth, self) }
     }
 
     /// Verifies the given server `ack`knowledgement and updates the client state.
-    pub fn verify_server_ack(&mut self, ack: &[u8; SERVER_ACK_BYTES]) -> bool {
+    pub fn verify_msg4(&mut self, ack: &[u8; MSG4_BYTES]) -> bool {
         unsafe { shs1_verify_server_ack(ack, self) }
     }
 
@@ -203,22 +196,22 @@ impl Server {
     }
 
     /// Verifies the given client `challenge` and updates the server state.
-    pub fn verify_client_challenge(&mut self, challenge: &[u8; CLIENT_CHALLENGE_BYTES]) -> bool {
+    pub fn verify_msg1(&mut self, challenge: &[u8; MSG1_BYTES]) -> bool {
         unsafe { shs1_verify_client_challenge(challenge, self) }
     }
 
     /// Writes the server challenge into `challenge` and updates the server state.
-    pub fn create_server_challenge(&mut self, challenge: &mut [u8; SERVER_CHALLENGE_BYTES]) {
+    pub fn create_msg2(&mut self, challenge: &mut [u8; MSG2_BYTES]) {
         unsafe { shs1_create_server_challenge(challenge, self) }
     }
 
     /// Verifies the given client `auth`entication and updates the server state.
-    pub fn verify_client_auth(&mut self, auth: &[u8; CLIENT_AUTH_BYTES]) -> bool {
+    pub fn verify_msg3(&mut self, auth: &[u8; MSG3_BYTES]) -> bool {
         unsafe { shs1_verify_client_auth(auth, self) }
     }
 
     /// Writes the server acknowledgement into `ack` and updates the server state.
-    pub fn create_server_ack(&mut self, ack: *mut [u8; SERVER_ACK_BYTES]) {
+    pub fn create_msg4(&mut self, ack: *mut [u8; MSG4_BYTES]) {
         unsafe { shs1_create_server_ack(ack, self) }
     }
 
@@ -231,27 +224,31 @@ impl Server {
     pub fn clean(&mut self) {
         unsafe { shs1_server_clean(self) }
     }
+
+    /// Returns the longterm public key of the client. This will return
+    /// uninitialized memory if called before the server verified msg3.
+    pub unsafe fn client_longterm_pub(&self) -> [u8; sign::PUBLICKEYBYTES] {
+        self.client_pub
+    }
 }
 
 extern "C" {
     // client side
-    fn shs1_create_client_challenge(challenge: *mut [u8; CLIENT_CHALLENGE_BYTES],
-                                    client: *mut Client);
-    fn shs1_verify_server_challenge(challenge: *const [u8; CLIENT_CHALLENGE_BYTES],
+    fn shs1_create_client_challenge(challenge: *mut [u8; MSG1_BYTES], client: *mut Client);
+    fn shs1_verify_server_challenge(challenge: *const [u8; MSG1_BYTES],
                                     client: *mut Client)
                                     -> bool;
-    fn shs1_create_client_auth(auth: *mut [u8; CLIENT_AUTH_BYTES], client: *mut Client) -> i32;
-    fn shs1_verify_server_ack(ack: *const [u8; SERVER_ACK_BYTES], client: *mut Client) -> bool;
+    fn shs1_create_client_auth(auth: *mut [u8; MSG3_BYTES], client: *mut Client) -> i32;
+    fn shs1_verify_server_ack(ack: *const [u8; MSG4_BYTES], client: *mut Client) -> bool;
     fn shs1_client_outcome(outcome: *mut Outcome, client: *mut Client);
     fn shs1_client_clean(client: *mut Client);
     // server side
-    fn shs1_verify_client_challenge(challenge: *const [u8; CLIENT_CHALLENGE_BYTES],
+    fn shs1_verify_client_challenge(challenge: *const [u8; MSG1_BYTES],
                                     server: *mut Server)
                                     -> bool;
-    fn shs1_create_server_challenge(challenge: *mut [u8; SERVER_CHALLENGE_BYTES],
-                                    server: *mut Server);
-    fn shs1_verify_client_auth(auth: *const [u8; CLIENT_AUTH_BYTES], server: *mut Server) -> bool;
-    fn shs1_create_server_ack(ack: *mut [u8; SERVER_ACK_BYTES], server: *mut Server);
+    fn shs1_create_server_challenge(challenge: *mut [u8; MSG2_BYTES], server: *mut Server);
+    fn shs1_verify_client_auth(auth: *const [u8; MSG3_BYTES], server: *mut Server) -> bool;
+    fn shs1_create_server_ack(ack: *mut [u8; MSG4_BYTES], server: *mut Server);
     fn shs1_server_outcome(outcome: *mut Outcome, server: *mut Server);
     fn shs1_server_clean(server: *mut Server);
 }
