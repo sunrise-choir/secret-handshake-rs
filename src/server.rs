@@ -53,6 +53,7 @@ impl<S, AuthFn, AsyncBool> ServerHandshaker<S, AuthFn, AsyncBool>
     }
 }
 
+/// Future implementation to asynchronously drive a handshake.
 impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
     where S: AsyncRead + AsyncWrite,
           AuthFn: FnOnce(&sign::PublicKey) -> AsyncBool,
@@ -87,7 +88,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG1_BYTES])
                                                  }) {
-                                return Err(ServerHandshakeError::InvalidChallenge(stream));
+                                return Err(ServerHandshakeError::InvalidMsg1(stream));
                             }
 
                             self.offset = 0;
@@ -148,7 +149,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                             return self.poll();
                         } else {
                             if !self.server.verify_msg3(&self.data) {
-                                return Err(ServerHandshakeError::InvalidAuth(stream));
+                                return Err(ServerHandshakeError::InvalidMsg3(stream));
                             }
 
                             let auth_fn = match self.auth
@@ -170,6 +171,7 @@ impl<S, AuthFn, AsyncBool> Future for ServerHandshaker<S, AuthFn, AsyncBool>
                     }
                 }
             }
+
             AuthenticateClient => {
                 let mut auth_future =
                     match self.auth
@@ -239,10 +241,10 @@ pub enum ServerHandshakeError<S, AuthErr> {
     IoErr(io::Error, S),
     /// The authentication function errored, the error is wrapped in this variant.
     AuthFnErr(AuthErr, S),
-    /// Received an invalid challenge from the client.
-    InvalidChallenge(S),
-    /// Received invalid authentication from the client.
-    InvalidAuth(S),
+    /// Received invalid msg1 from the client.
+    InvalidMsg1(S),
+    /// Received invalid msg3 from the client.
+    InvalidMsg3(S),
 }
 
 impl<S: Debug, AuthErr: error::Error> fmt::Display for ServerHandshakeError<S, AuthErr> {
@@ -260,8 +262,8 @@ impl<S: Debug, AuthErr: error::Error> error::Error for ServerHandshakeError<S, A
         match *self {
             ServerHandshakeError::IoErr(ref err, _) => "IO error during handshake",
             ServerHandshakeError::AuthFnErr(ref err, _) => "Error during authentication",
-            ServerHandshakeError::InvalidChallenge(_) => "received invalid challenge",
-            ServerHandshakeError::InvalidAuth(_) => "received invalid authentication",
+            ServerHandshakeError::InvalidMsg1(_) => "received invalid msg1",
+            ServerHandshakeError::InvalidMsg3(_) => "received invalid msg3",
         }
     }
 
@@ -269,14 +271,13 @@ impl<S: Debug, AuthErr: error::Error> error::Error for ServerHandshakeError<S, A
         match *self {
             ServerHandshakeError::IoErr(ref err, _) => Some(err),
             ServerHandshakeError::AuthFnErr(ref err, _) => Some(err),
-            ServerHandshakeError::InvalidChallenge(_) => None,
-            ServerHandshakeError::InvalidAuth(_) => None,
+            ServerHandshakeError::InvalidMsg1(_) => None,
+            ServerHandshakeError::InvalidMsg3(_) => None,
         }
     }
 }
 
 // State for the future state machine.
-#[derive(Debug)]
 enum State {
     ReadMsg1,
     WriteMsg2,
