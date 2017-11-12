@@ -53,6 +53,13 @@ impl<S: AsyncRead + AsyncWrite> ClientHandshaker<S> {
     }
 }
 
+/// Zero buffered handshake data on dropping.
+impl<S> Drop for ClientHandshaker<S> {
+    fn drop(&mut self) {
+        self.data = [0; MSG3_BYTES];
+    }
+}
+
 /// Future implementation to asynchronously drive a handshake.
 impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
     type Item = (Result<Outcome, ClientHandshakeFailure>, S);
@@ -71,7 +78,6 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((e, stream));
                         }
                     }
@@ -98,7 +104,6 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((e, stream));
                         }
                     }
@@ -113,7 +118,6 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG2_BYTES])
                                                  }) {
-                                self.data = [0; MSG3_BYTES];
                                 return Ok(Async::Ready((Err(ClientHandshakeFailure::InvalidMsg2),
                                                         stream)));
                             }
@@ -136,7 +140,6 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((e, stream));
                         }
                     }
@@ -163,7 +166,6 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((e, stream));
                         }
                     }
@@ -178,14 +180,12 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG4_BYTES])
                                                  }) {
-                                self.data = [0; MSG3_BYTES];
                                 return Ok(Async::Ready((Err(ClientHandshakeFailure::InvalidMsg4),
                                                         stream)));
                             }
 
                             let mut outcome = unsafe { uninitialized() };
                             self.client.outcome(&mut outcome);
-                            self.data = [0; MSG3_BYTES]; // TODO make this a cleanup method, also call this on dropping
                             return Ok(Async::Ready((Ok(outcome), stream)));
                         }
                     }

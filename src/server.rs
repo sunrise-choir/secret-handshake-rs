@@ -99,6 +99,13 @@ pub struct ServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
     offset: usize, // offset into the data array at which to read/write
 }
 
+/// Zero buffered handshake data on dropping.
+impl<S, FilterFn, AsyncBool> Drop for ServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+    fn drop(&mut self) {
+        self.data = [0; MSG3_BYTES];
+    }
+}
+
 impl<S, FilterFn, AsyncBool> ServerHandshakerWithFilter<S, FilterFn, AsyncBool>
     where S: AsyncRead + AsyncWrite,
           FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
@@ -159,7 +166,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((ServerHandshakeError::IoErr(e), stream));
                         }
                     }
@@ -174,7 +180,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG1_BYTES])
                                                  }) {
-                                self.data = [0; MSG3_BYTES];
                                 return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::InvalidMsg1),
                                                         stream)));
                             }
@@ -201,7 +206,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((ServerHandshakeError::IoErr(e), stream));
                         }
                     }
@@ -228,7 +232,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((ServerHandshakeError::IoErr(e), stream));
                         }
                     }
@@ -239,7 +242,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                             return self.poll();
                         } else {
                             if !self.server.verify_msg3(&self.data) {
-                                self.data = [0; MSG3_BYTES];
                                 return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::InvalidMsg3),
                                                         stream)));
                             }
@@ -281,7 +283,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                     }
                     Ok(Async::Ready(is_authorized)) => {
                         if !is_authorized {
-                            self.data = [0; MSG3_BYTES];
                             return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::UnauthorizedClient), stream)));
                         }
 
@@ -306,7 +307,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                             self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            self.data = [0; MSG3_BYTES];
                             return Err((ServerHandshakeError::IoErr(e), stream));
                         }
                     }
@@ -318,7 +318,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                         } else {
                             let mut outcome = unsafe { uninitialized() };
                             self.server.outcome(&mut outcome);
-                            self.data = [0; MSG3_BYTES];
                             return Ok(Async::Ready((Ok(outcome), stream)));
                         }
                     }
