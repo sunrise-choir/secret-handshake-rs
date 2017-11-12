@@ -12,6 +12,7 @@ sodiumoxide = "0.0.15"
 libc = "0.2"
 futures = "0.1.14"
 tokio-io = "0.1.2"
+void = "1.0.2"
 
 [dev-dependencies]
 partial-io = { version = "0.2.3", features = ["quickcheck", "tokio"] }
