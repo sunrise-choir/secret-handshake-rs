@@ -198,6 +198,7 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
 
 /// Reason why a client might reject the server although the handshake itself
 /// was executed without IO errors.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ClientHandshakeFailure {
     /// Received invalid msg2 from the server.
     InvalidMsg2,

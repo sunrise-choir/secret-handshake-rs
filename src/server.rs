@@ -81,6 +81,7 @@ fn const_async_true(_: &sign::PublicKey) -> FutureResult<bool, Void> {
 
 /// Reason why a server might reject the client although the handshake itself
 /// was executed without IO errors.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ServerHandshakeFailure {
     /// Received invalid msg1 from the client.
     InvalidMsg1,
@@ -382,6 +383,7 @@ use server::FilterStuff::*;
 
 /// Reason why a filtering server might reject the client although the handshake itself
 /// was executed without IO errors.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ServerHandshakeFailureWithFilter {
     /// Received invalid msg1 from the client.
     InvalidMsg1,
