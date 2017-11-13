@@ -88,11 +88,30 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             return self.poll();
                         } else {
                             self.offset = 0;
-                            self.state = ReadMsg2;
+                            self.state = FlushMsg1;
 
                             self.stream = Some(stream);
                             return self.poll();
                         }
+                    }
+                }
+            }
+
+            FlushMsg1 => {
+                match stream.flush() {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
+                        } else {
+                            return Err((e, stream));
+                        }
+                    }
+                    Ok(_) => {
+                        self.state = ReadMsg2;
+
+                        self.stream = Some(stream);
+                        return self.poll();
                     }
                 }
             }
@@ -150,11 +169,30 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                             return self.poll();
                         } else {
                             self.offset = 0;
-                            self.state = ReadMsg4;
+                            self.state = FlushMsg3;
 
                             self.stream = Some(stream);
                             return self.poll();
                         }
+                    }
+                }
+            }
+
+            FlushMsg3 => {
+                match stream.flush() {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
+                        } else {
+                            return Err((e, stream));
+                        }
+                    }
+                    Ok(_) => {
+                        self.state = ReadMsg4;
+
+                        self.stream = Some(stream);
+                        return self.poll();
                     }
                 }
             }
@@ -209,8 +247,10 @@ pub enum ClientHandshakeFailure {
 // State for the future state machine.
 enum State {
     WriteMsg1,
+    FlushMsg1,
     ReadMsg2,
     WriteMsg3,
+    FlushMsg3,
     ReadMsg4,
 }
 use client::State::*;

@@ -217,11 +217,30 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                             return self.poll();
                         } else {
                             self.offset = 0;
-                            self.state = ReadMsg3;
+                            self.state = FlushMsg2;
 
                             self.stream = Some(stream);
                             return self.poll();
                         }
+                    }
+                }
+            }
+
+            FlushMsg2 => {
+                match stream.flush() {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
+                        } else {
+                            return Err((ServerHandshakeError::IoErr(e), stream));
+                        }
+                    }
+                    Ok(_) => {
+                        self.state = ReadMsg3;
+
+                        self.stream = Some(stream);
+                        return self.poll();
                     }
                 }
             }
@@ -317,10 +336,29 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                             self.stream = Some(stream);
                             return self.poll();
                         } else {
-                            let mut outcome = unsafe { uninitialized() };
-                            self.server.outcome(&mut outcome);
-                            return Ok(Async::Ready((Ok(outcome), stream)));
+                            self.state = FlushMsg4;
+
+                            self.stream = Some(stream);
+                            return self.poll();
                         }
+                    }
+                }
+            }
+
+            FlushMsg4 => {
+                match stream.flush() {
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            self.stream = Some(stream);
+                            return Ok(Async::NotReady);
+                        } else {
+                            return Err((ServerHandshakeError::IoErr(e), stream));
+                        }
+                    }
+                    Ok(_) => {
+                        let mut outcome = unsafe { uninitialized() };
+                        self.server.outcome(&mut outcome);
+                        return Ok(Async::Ready((Ok(outcome), stream)));
                     }
                 }
             }
@@ -369,9 +407,11 @@ impl<FilterErr: error::Error> error::Error for ServerHandshakeError<FilterErr> {
 enum State {
     ReadMsg1,
     WriteMsg2,
+    FlushMsg2,
     ReadMsg3,
     FilterClient,
     WriteMsg4,
+    FlushMsg4,
 }
 use server::State::*;
 
