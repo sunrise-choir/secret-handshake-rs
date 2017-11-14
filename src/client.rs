@@ -68,148 +68,79 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         match self.state {
             WriteMsg1 => {
-                match self.stream.write(&self.data[self.offset..MSG1_BYTES]) {
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::WouldBlock {
-                            return Ok(Async::NotReady);
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                    Ok(written) => {
-                        self.offset += written;
-                        if self.offset < MSG1_BYTES {
-                            return self.poll();
-                        } else {
-                            self.offset = 0;
-                            self.state = FlushMsg1;
-
-                            return self.poll();
-                        }
-                    }
+                while self.offset < MSG1_BYTES {
+                    self.offset += try_nb!(self.stream.write(&self.data[self.offset..MSG1_BYTES]));
                 }
+
+                self.offset = 0;
+                self.state = FlushMsg1;
+                return self.poll();
             }
 
             FlushMsg1 => {
-                match self.stream.flush() {
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::WouldBlock {
-                            return Ok(Async::NotReady);
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                    Ok(_) => {
-                        self.state = ReadMsg2;
+                try_nb!(self.stream.flush());
 
-                        return self.poll();
-                    }
-                }
+                self.state = ReadMsg2;
+                return self.poll();
             }
 
             ReadMsg2 => {
-                match self.stream.read(&mut self.data[self.offset..MSG2_BYTES]) {
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::WouldBlock {
-                            return Ok(Async::NotReady);
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                    Ok(read) => {
-                        self.offset += read;
-                        if self.offset < MSG2_BYTES {
-                            return self.poll();
-                        } else {
-                            if !self.client
-                                    .verify_msg2(unsafe {
-                                                     &*(&self.data as *const [u8; MSG3_BYTES] as
-                                                        *const [u8; MSG2_BYTES])
-                                                 }) {
-                                return Ok(Async::Ready(Err(ClientHandshakeFailure::InvalidMsg2)));
-                            }
-
-                            self.offset = 0;
-                            self.state = WriteMsg3;
-                            self.client.create_msg3(&mut self.data);
-
-                            return self.poll();
-                        }
-                    }
+                while self.offset < MSG2_BYTES {
+                    self.offset += try_nb!(self.stream.read(&mut self.data[self.offset..
+                                                                 MSG2_BYTES]));
                 }
+
+                if !self.client
+                        .verify_msg2(unsafe {
+                                         &*(&self.data as *const [u8; MSG3_BYTES] as
+                                            *const [u8; MSG2_BYTES])
+                                     }) {
+                    return Ok(Async::Ready(Err(ClientHandshakeFailure::InvalidMsg2)));
+                }
+
+                self.offset = 0;
+                self.state = WriteMsg3;
+                self.client.create_msg3(&mut self.data);
+                return self.poll();
             }
 
             WriteMsg3 => {
-                match self.stream.write(&self.data[self.offset..MSG3_BYTES]) {
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::WouldBlock {
-                            return Ok(Async::NotReady);
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                    Ok(written) => {
-                        self.offset += written;
-                        if self.offset < MSG3_BYTES {
-                            return self.poll();
-                        } else {
-                            self.offset = 0;
-                            self.state = FlushMsg3;
-
-                            return self.poll();
-                        }
-                    }
+                while self.offset < MSG3_BYTES {
+                    self.offset += try_nb!(self.stream.write(&self.data[self.offset..MSG3_BYTES]));
                 }
+
+                self.offset = 0;
+                self.state = FlushMsg3;
+                return self.poll();
             }
 
             FlushMsg3 => {
-                match self.stream.flush() {
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::WouldBlock {
-                            return Ok(Async::NotReady);
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                    Ok(_) => {
-                        self.state = ReadMsg4;
+                try_nb!(self.stream.flush());
 
-                        return self.poll();
-                    }
-                }
+                self.state = ReadMsg4;
+                return self.poll();
             }
 
             ReadMsg4 => {
-                match self.stream.read(&mut self.data[self.offset..MSG4_BYTES]) {
-                    Err(e) => {
-                        if e.kind() == io::ErrorKind::WouldBlock {
-                            return Ok(Async::NotReady);
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                    Ok(read) => {
-                        self.offset += read;
-                        if self.offset < MSG4_BYTES {
-                            return self.poll();
-                        } else {
-                            if !self.client
-                                    .verify_msg4(unsafe {
-                                                     &*(&self.data as *const [u8; MSG3_BYTES] as
-                                                        *const [u8; MSG4_BYTES])
-                                                 }) {
-                                return Ok(Async::Ready(Err(ClientHandshakeFailure::InvalidMsg4)));
-                            }
-
-                            let mut outcome = unsafe { uninitialized() };
-                            self.client.outcome(&mut outcome);
-                            return Ok(Async::Ready(Ok(outcome)));
-                        }
-                    }
+                while self.offset < MSG4_BYTES {
+                    self.offset += try_nb!(self.stream.read(&mut self.data[self.offset..
+                                                                 MSG4_BYTES]));
                 }
-            }
-        }
 
+                if !self.client
+                        .verify_msg4(unsafe {
+                                         &*(&self.data as *const [u8; MSG3_BYTES] as
+                                            *const [u8; MSG4_BYTES])
+                                     }) {
+                    return Ok(Async::Ready(Err(ClientHandshakeFailure::InvalidMsg4)));
+                }
+
+                let mut outcome = unsafe { uninitialized() };
+                self.client.outcome(&mut outcome);
+                return Ok(Async::Ready(Ok(outcome)));
+            }
+
+        }
     }
 }
 

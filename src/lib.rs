@@ -9,6 +9,7 @@
 extern crate sodiumoxide;
 extern crate libc;
 extern crate futures;
+#[macro_use]
 extern crate tokio_io;
 extern crate void;
 
