@@ -50,28 +50,28 @@ impl Drop for Outcome {
 
 impl Outcome {
     /// The negotiated key that should be used to encrypt messages to the peer.
-    pub fn encryption_key(&self) -> &[u8; secretbox::KEYBYTES] {
-        &self.encryption_key
+    pub fn encryption_key(&self) -> [u8; secretbox::KEYBYTES] {
+        self.encryption_key
     }
 
     /// The negotiated initial nonce that should be used to encrypt messages to the peer.
-    pub fn encryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
-        &self.encryption_nonce
+    pub fn encryption_nonce(&self) -> [u8; secretbox::NONCEBYTES] {
+        self.encryption_nonce
     }
 
     /// The negotiated key that should be used to decrypt messages from the peer.
-    pub fn decryption_key(&self) -> &[u8; secretbox::KEYBYTES] {
-        &self.decryption_key
+    pub fn decryption_key(&self) -> [u8; secretbox::KEYBYTES] {
+        self.decryption_key
     }
 
     /// The negotiated initial nonce that should be used to decrypt messages from the peer.
-    pub fn decryption_nonce(&self) -> &[u8; secretbox::NONCEBYTES] {
-        &self.decryption_nonce
+    pub fn decryption_nonce(&self) -> [u8; secretbox::NONCEBYTES] {
+        self.decryption_nonce
     }
 
     /// The longterm public key of the peer.
-    pub fn peer_longterm_pk(&self) -> &[u8; sign::PUBLICKEYBYTES] {
-        &self.peer_longterm_pk
+    pub fn peer_longterm_pk(&self) -> [u8; sign::PUBLICKEYBYTES] {
+        self.peer_longterm_pk
     }
 }
 
