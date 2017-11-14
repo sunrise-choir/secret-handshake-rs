@@ -12,27 +12,27 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use crypto::*;
 
 /// Performs the client side of a handshake.
-pub struct ClientHandshaker<S> {
-    stream: Option<S>,
+pub struct ClientHandshaker<'s, S: 's> {
+    stream: &'s mut S,
     client: Client,
     state: State,
     data: [u8; MSG3_BYTES], // used to hold and cache the results of `client.create_client_challenge` and `client.create_client_auth`, and any data read from the server
     offset: usize, // offset into the data array at which to read/write
 }
 
-impl<S: AsyncRead + AsyncWrite> ClientHandshaker<S> {
+impl<'s, S: AsyncRead + AsyncWrite> ClientHandshaker<'s, S> {
     /// Creates a new ClientHandshaker to connect to a server with known public key
     /// and app key over the given `stream`.
-    pub fn new(stream: S,
+    pub fn new(stream: &'s mut S,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
                client_longterm_pk: &[u8; sign::PUBLICKEYBYTES],
                client_longterm_sk: &[u8; sign::SECRETKEYBYTES],
                client_ephemeral_pk: &[u8; box_::PUBLICKEYBYTES],
                client_ephemeral_sk: &[u8; box_::SECRETKEYBYTES],
                server_longterm_pk: &[u8; sign::PUBLICKEYBYTES])
-               -> ClientHandshaker<S> {
+               -> ClientHandshaker<'s, S> {
         let mut ret = ClientHandshaker {
-            stream: Some(stream),
+            stream: stream,
             client: Client::new(network_identifier,
                                 client_longterm_pk,
                                 client_longterm_sk,
@@ -54,43 +54,36 @@ impl<S: AsyncRead + AsyncWrite> ClientHandshaker<S> {
 }
 
 /// Zero buffered handshake data on dropping.
-impl<S> Drop for ClientHandshaker<S> {
+impl<'s, S> Drop for ClientHandshaker<'s, S> {
     fn drop(&mut self) {
         self.data = [0; MSG3_BYTES];
     }
 }
 
 /// Future implementation to asynchronously drive a handshake.
-impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
-    type Item = (Result<Outcome, ClientHandshakeFailure>, S);
-    type Error = (io::Error, S);
+impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
+    type Item = Result<Outcome, ClientHandshakeFailure>;
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let mut stream = self.stream
-            .take()
-            .expect("Attempted to poll ClientHandshaker after completion");
-
         match self.state {
             WriteMsg1 => {
-                match stream.write(&self.data[self.offset..MSG1_BYTES]) {
+                match self.stream.write(&self.data[self.offset..MSG1_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((e, stream));
+                            return Err(e);
                         }
                     }
                     Ok(written) => {
                         self.offset += written;
                         if self.offset < MSG1_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             self.offset = 0;
                             self.state = FlushMsg1;
 
-                            self.stream = Some(stream);
                             return self.poll();
                         }
                     }
@@ -98,38 +91,34 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
             }
 
             FlushMsg1 => {
-                match stream.flush() {
+                match self.stream.flush() {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((e, stream));
+                            return Err(e);
                         }
                     }
                     Ok(_) => {
                         self.state = ReadMsg2;
 
-                        self.stream = Some(stream);
                         return self.poll();
                     }
                 }
             }
 
             ReadMsg2 => {
-                match stream.read(&mut self.data[self.offset..MSG2_BYTES]) {
+                match self.stream.read(&mut self.data[self.offset..MSG2_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((e, stream));
+                            return Err(e);
                         }
                     }
                     Ok(read) => {
                         self.offset += read;
                         if self.offset < MSG2_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             if !self.client
@@ -137,15 +126,13 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG2_BYTES])
                                                  }) {
-                                return Ok(Async::Ready((Err(ClientHandshakeFailure::InvalidMsg2),
-                                                        stream)));
+                                return Ok(Async::Ready(Err(ClientHandshakeFailure::InvalidMsg2)));
                             }
 
                             self.offset = 0;
                             self.state = WriteMsg3;
                             self.client.create_msg3(&mut self.data);
 
-                            self.stream = Some(stream);
                             return self.poll();
                         }
                     }
@@ -153,25 +140,22 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
             }
 
             WriteMsg3 => {
-                match stream.write(&self.data[self.offset..MSG3_BYTES]) {
+                match self.stream.write(&self.data[self.offset..MSG3_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((e, stream));
+                            return Err(e);
                         }
                     }
                     Ok(written) => {
                         self.offset += written;
                         if self.offset < MSG3_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             self.offset = 0;
                             self.state = FlushMsg3;
 
-                            self.stream = Some(stream);
                             return self.poll();
                         }
                     }
@@ -179,38 +163,34 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
             }
 
             FlushMsg3 => {
-                match stream.flush() {
+                match self.stream.flush() {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((e, stream));
+                            return Err(e);
                         }
                     }
                     Ok(_) => {
                         self.state = ReadMsg4;
 
-                        self.stream = Some(stream);
                         return self.poll();
                     }
                 }
             }
 
             ReadMsg4 => {
-                match stream.read(&mut self.data[self.offset..MSG4_BYTES]) {
+                match self.stream.read(&mut self.data[self.offset..MSG4_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((e, stream));
+                            return Err(e);
                         }
                     }
                     Ok(read) => {
                         self.offset += read;
                         if self.offset < MSG4_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             if !self.client
@@ -218,13 +198,12 @@ impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG4_BYTES])
                                                  }) {
-                                return Ok(Async::Ready((Err(ClientHandshakeFailure::InvalidMsg4),
-                                                        stream)));
+                                return Ok(Async::Ready(Err(ClientHandshakeFailure::InvalidMsg4)));
                             }
 
                             let mut outcome = unsafe { uninitialized() };
                             self.client.outcome(&mut outcome);
-                            return Ok(Async::Ready((Ok(outcome), stream)));
+                            return Ok(Async::Ready(Ok(outcome)));
                         }
                     }
                 }

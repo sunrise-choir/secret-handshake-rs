@@ -14,12 +14,14 @@ use void::Void;
 use crypto::*;
 
 /// Performs the server side of a handshake.
-pub struct ServerHandshaker<S>(ServerHandshakerWithFilter<S,
-                                                           fn(&sign::PublicKey)
-                                                              -> FutureResult<bool, Void>,
-                                                           FutureResult<bool, Void>>);
+pub struct ServerHandshaker<'s, S: 's>(ServerHandshakerWithFilter<'s,
+                                                                   S,
+                                                                   fn(&sign::PublicKey)
+                                                                      -> FutureResult<bool,
+                                                                                       Void>,
+                                                                   FutureResult<bool, Void>>);
 
-impl<S: AsyncRead + AsyncWrite> ServerHandshaker<S> {
+impl<'s, S: AsyncRead + AsyncWrite> ServerHandshaker<'s, S> {
     /// Creates a new ServerHandshakerWithFilter to accept a connection from a
     /// client which knows the server's public key and uses the right app key
     /// over the given `stream`.
@@ -27,13 +29,13 @@ impl<S: AsyncRead + AsyncWrite> ServerHandshaker<S> {
     /// This consumes ownership of the stream, so that no other reads/writes can
     /// interfere with the handshake. When the Future resolves, ownership of the
     /// stream is returned as well.
-    pub fn new(stream: S,
+    pub fn new(stream: &'s mut S,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
                server_longterm_pk: &[u8; sign::PUBLICKEYBYTES],
                server_longterm_sk: &[u8; sign::SECRETKEYBYTES],
                server_ephemeral_pk: &[u8; box_::PUBLICKEYBYTES],
                server_ephemeral_sk: &[u8; box_::SECRETKEYBYTES])
-               -> ServerHandshaker<S> {
+               -> ServerHandshaker<'s, S> {
         ServerHandshaker(ServerHandshakerWithFilter::new(stream,
                                                          const_async_true,
                                                          network_identifier,
@@ -44,32 +46,32 @@ impl<S: AsyncRead + AsyncWrite> ServerHandshaker<S> {
     }
 }
 
-impl<S: AsyncRead + AsyncWrite> Future for ServerHandshaker<S> {
-    type Item = (Result<Outcome, ServerHandshakeFailure>, S);
-    type Error = (io::Error, S);
+impl<'s, S: AsyncRead + AsyncWrite> Future for ServerHandshaker<'s, S> {
+    type Item = Result<Outcome, ServerHandshakeFailure>;
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         match self.0.poll() {
-            Ok(Async::Ready((Ok(outcome), s))) => Ok(Async::Ready((Ok(outcome), s))),
-            Ok(Async::Ready((Err(failure), s))) => {
+            Ok(Async::Ready(Ok(outcome))) => Ok(Async::Ready(Ok(outcome))),
+            Ok(Async::Ready(Err(failure))) => {
                 match failure {
                     ServerHandshakeFailureWithFilter::InvalidMsg1 => {
-                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg1), s)))
+                        Ok(Async::Ready(Err(ServerHandshakeFailure::InvalidMsg1)))
                     }
                     ServerHandshakeFailureWithFilter::InvalidMsg3 => {
-                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg3), s)))
+                        Ok(Async::Ready(Err(ServerHandshakeFailure::InvalidMsg3)))
                     }
                     ServerHandshakeFailureWithFilter::UnauthorizedClient => unreachable!(),
                 }
             }
             Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err((e, s)) => {
+            Err(e) => {
                 let new_err = match e {
                     ServerHandshakeError::FilterFnErr(_) => unreachable!(),
                     ServerHandshakeError::IoErr(io_err) => io_err,
                 };
 
-                Err((new_err, s))
+                Err(new_err)
             }
         }
     }
@@ -91,8 +93,8 @@ pub enum ServerHandshakeFailure {
 
 /// Performs the server side of a handshake. Allows filtering clients based on
 /// their longterm public key.
-pub struct ServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
-    stream: Option<S>,
+pub struct ServerHandshakerWithFilter<'s, S: 's, FilterFn, AsyncBool> {
+    stream: &'s mut S,
     filter: Option<FilterStuff<FilterFn, AsyncBool>>,
     server: Server,
     state: State,
@@ -101,13 +103,13 @@ pub struct ServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
 }
 
 /// Zero buffered handshake data on dropping.
-impl<S, FilterFn, AsyncBool> Drop for ServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+impl<'s, S, FilterFn, AsyncBool> Drop for ServerHandshakerWithFilter<'s, S, FilterFn, AsyncBool> {
     fn drop(&mut self) {
         self.data = [0; MSG3_BYTES];
     }
 }
 
-impl<S, FilterFn, AsyncBool> ServerHandshakerWithFilter<S, FilterFn, AsyncBool>
+impl<'s, S, FilterFn, AsyncBool> ServerHandshakerWithFilter<'s, S, FilterFn, AsyncBool>
     where S: AsyncRead + AsyncWrite,
           FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
           AsyncBool: Future<Item = bool>
@@ -123,16 +125,16 @@ impl<S, FilterFn, AsyncBool> ServerHandshakerWithFilter<S, FilterFn, AsyncBool>
     /// This consumes ownership of the stream, so that no other reads/writes can
     /// interfere with the handshake. When the Future resolves, ownership of the
     /// stream is returned as well.
-    pub fn new(stream: S,
+    pub fn new(stream: &'s mut S,
                filter_fn: FilterFn,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
                server_longterm_pk: &[u8; sign::PUBLICKEYBYTES],
                server_longterm_sk: &[u8; sign::SECRETKEYBYTES],
                server_ephemeral_pk: &[u8; box_::PUBLICKEYBYTES],
                server_ephemeral_sk: &[u8; box_::SECRETKEYBYTES])
-               -> ServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+               -> ServerHandshakerWithFilter<'s, S, FilterFn, AsyncBool> {
         ServerHandshakerWithFilter {
-            stream: Some(stream),
+            stream: stream,
             filter: Some(FilterFun(filter_fn)),
             server: Server::new(network_identifier,
                                 server_longterm_pk,
@@ -147,33 +149,28 @@ impl<S, FilterFn, AsyncBool> ServerHandshakerWithFilter<S, FilterFn, AsyncBool>
 }
 
 /// Future implementation to asynchronously drive a handshake.
-impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, AsyncBool>
+impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, FilterFn, AsyncBool>
     where S: AsyncRead + AsyncWrite,
           FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
           AsyncBool: Future<Item = bool>
 {
-    type Item = (Result<Outcome, ServerHandshakeFailureWithFilter>, S);
-    type Error = (ServerHandshakeError<AsyncBool::Error>, S);
+    type Item = Result<Outcome, ServerHandshakeFailureWithFilter>;
+    type Error = ServerHandshakeError<AsyncBool::Error>;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let mut stream = self.stream
-            .take()
-            .expect("Attempted to poll ServerHandshaker after completion");
         match self.state {
             ReadMsg1 => {
-                match stream.read(&mut self.data[self.offset..MSG1_BYTES]) {
+                match self.stream.read(&mut self.data[self.offset..MSG1_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((ServerHandshakeError::IoErr(e), stream));
+                            return Err(ServerHandshakeError::IoErr(e));
                         }
                     }
                     Ok(read) => {
                         self.offset += read;
                         if self.offset < MSG1_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             if !self.server
@@ -181,8 +178,7 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                                                      &*(&self.data as *const [u8; MSG3_BYTES] as
                                                         *const [u8; MSG1_BYTES])
                                                  }) {
-                                return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::InvalidMsg1),
-                                                        stream)));
+                                return Ok(Async::Ready(Err(ServerHandshakeFailureWithFilter::InvalidMsg1)));
                             }
 
                             self.offset = 0;
@@ -193,7 +189,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                                                         *mut [u8; MSG2_BYTES])
                                              });
 
-                            self.stream = Some(stream);
                             return self.poll();
                         }
                     }
@@ -201,25 +196,22 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
             }
 
             WriteMsg2 => {
-                match stream.write(&self.data[self.offset..MSG2_BYTES]) {
+                match self.stream.write(&self.data[self.offset..MSG2_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((ServerHandshakeError::IoErr(e), stream));
+                            return Err(ServerHandshakeError::IoErr(e));
                         }
                     }
                     Ok(written) => {
                         self.offset += written;
                         if self.offset < MSG2_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             self.offset = 0;
                             self.state = FlushMsg2;
 
-                            self.stream = Some(stream);
                             return self.poll();
                         }
                     }
@@ -227,43 +219,38 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
             }
 
             FlushMsg2 => {
-                match stream.flush() {
+                match self.stream.flush() {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((ServerHandshakeError::IoErr(e), stream));
+                            return Err(ServerHandshakeError::IoErr(e)); // TODO macro try_async
                         }
                     }
                     Ok(_) => {
                         self.state = ReadMsg3;
 
-                        self.stream = Some(stream);
                         return self.poll();
                     }
                 }
             }
 
             ReadMsg3 => {
-                match stream.read(&mut self.data[self.offset..MSG3_BYTES]) {
+                match self.stream.read(&mut self.data[self.offset..MSG3_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((ServerHandshakeError::IoErr(e), stream));
+                            return Err(ServerHandshakeError::IoErr(e));
                         }
                     }
                     Ok(read) => {
                         self.offset += read;
                         if self.offset < MSG3_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             if !self.server.verify_msg3(&self.data) {
-                                return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::InvalidMsg3),
-                                                        stream)));
+                                return Ok(Async::Ready(Err(ServerHandshakeFailureWithFilter::InvalidMsg3)));
                             }
 
                             let filter_fn = match self.filter
@@ -279,7 +266,6 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                                                          }))));
                             self.state = FilterClient;
 
-                            self.stream = Some(stream);
                             return self.poll();
                         }
                     }
@@ -296,14 +282,14 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                     };
 
                 match filter_future.poll() {
-                    Err(e) => return Err((ServerHandshakeError::FilterFnErr(e), stream)),
+                    Err(e) => return Err(ServerHandshakeError::FilterFnErr(e)),
                     Ok(Async::NotReady) => {
                         self.filter = Some(FilterFuture(filter_future));
                         return Ok(Async::NotReady);
                     }
                     Ok(Async::Ready(is_authorized)) => {
                         if !is_authorized {
-                            return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::UnauthorizedClient), stream)));
+                            return Ok(Async::Ready(Err(ServerHandshakeFailureWithFilter::UnauthorizedClient)));
                         }
 
                         self.offset = 0;
@@ -314,31 +300,27 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
                                                     *mut [u8; MSG4_BYTES])
                                          });
 
-                        self.stream = Some(stream);
                         return self.poll();
                     }
                 }
             }
 
             WriteMsg4 => {
-                match stream.write(&self.data[self.offset..MSG4_BYTES]) {
+                match self.stream.write(&self.data[self.offset..MSG4_BYTES]) {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((ServerHandshakeError::IoErr(e), stream));
+                            return Err(ServerHandshakeError::IoErr(e));
                         }
                     }
                     Ok(written) => {
                         self.offset += written;
                         if self.offset < MSG4_BYTES {
-                            self.stream = Some(stream);
                             return self.poll();
                         } else {
                             self.state = FlushMsg4;
 
-                            self.stream = Some(stream);
                             return self.poll();
                         }
                     }
@@ -346,19 +328,18 @@ impl<S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<S, FilterFn, 
             }
 
             FlushMsg4 => {
-                match stream.flush() {
+                match self.stream.flush() {
                     Err(e) => {
                         if e.kind() == io::ErrorKind::WouldBlock {
-                            self.stream = Some(stream);
                             return Ok(Async::NotReady);
                         } else {
-                            return Err((ServerHandshakeError::IoErr(e), stream));
+                            return Err(ServerHandshakeError::IoErr(e));
                         }
                     }
                     Ok(_) => {
                         let mut outcome = unsafe { uninitialized() };
                         self.server.outcome(&mut outcome);
-                        return Ok(Async::Ready((Ok(outcome), stream)));
+                        return Ok(Async::Ready(Ok(outcome)));
                     }
                 }
             }
