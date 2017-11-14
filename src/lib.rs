@@ -14,9 +14,11 @@ extern crate tokio_io;
 extern crate void;
 
 pub mod crypto;
-pub mod client;
-pub mod server;
+mod client;
+mod server;
 
+pub use client::*;
+pub use server::*;
 pub use crypto::Outcome;
 
 #[cfg(test)]

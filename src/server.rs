@@ -282,7 +282,8 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
     }
 }
 
-/// A fatal error that occured during the asynchronous execution of a handshake.
+/// A fatal error that occured during the execution of a handshake by a
+/// filtering server.
 #[derive(Debug)]
 pub enum ServerHandshakeError<FilterErr> {
     /// An IO error occured during reading or writing. The contained error is
