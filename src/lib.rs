@@ -19,7 +19,7 @@ mod server;
 
 pub use client::*;
 pub use server::*;
-pub use crypto::Outcome;
+pub use crypto::{Outcome, NETWORK_IDENTIFIER_BYTES};
 
 #[cfg(test)]
 extern crate partial_io;
