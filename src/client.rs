@@ -25,20 +25,20 @@ impl<'s, S: AsyncRead + AsyncWrite> ClientHandshaker<'s, S> {
     /// and app key over the given `stream`.
     pub fn new(stream: &'s mut S,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
-               client_longterm_pk: &[u8; sign::PUBLICKEYBYTES],
-               client_longterm_sk: &[u8; sign::SECRETKEYBYTES],
-               client_ephemeral_pk: &[u8; box_::PUBLICKEYBYTES],
-               client_ephemeral_sk: &[u8; box_::SECRETKEYBYTES],
-               server_longterm_pk: &[u8; sign::PUBLICKEYBYTES])
+               client_longterm_pk: &sign::PublicKey,
+               client_longterm_sk: &sign::SecretKey,
+               client_ephemeral_pk: &box_::PublicKey,
+               client_ephemeral_sk: &box_::SecretKey,
+               server_longterm_pk: &sign::PublicKey)
                -> ClientHandshaker<'s, S> {
         let mut ret = ClientHandshaker {
             stream: stream,
             client: Client::new(network_identifier,
-                                client_longterm_pk,
-                                client_longterm_sk,
-                                client_ephemeral_pk,
-                                client_ephemeral_sk,
-                                server_longterm_pk),
+                                &client_longterm_pk.0,
+                                &client_longterm_sk.0,
+                                &client_ephemeral_pk.0,
+                                &client_ephemeral_sk.0,
+                                &server_longterm_pk.0),
             state: WriteMsg1,
             data: [0; MSG3_BYTES],
             offset: 0,

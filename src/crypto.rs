@@ -61,12 +61,12 @@ impl Outcome {
 
     /// The negotiated key that should be used to decrypt messages from the peer.
     pub fn decryption_key(&self) -> secretbox::Key {
-        secretbox::Key(self.encryption_key)
+        secretbox::Key(self.decryption_key)
     }
 
     /// The negotiated initial nonce that should be used to decrypt messages from the peer.
     pub fn decryption_nonce(&self) -> secretbox::Nonce {
-        secretbox::Nonce(self.encryption_nonce)
+        secretbox::Nonce(self.decryption_nonce)
     }
 
     /// The longterm public key of the peer.

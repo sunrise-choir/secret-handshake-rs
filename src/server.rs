@@ -31,18 +31,18 @@ impl<'s, S: AsyncRead + AsyncWrite> ServerHandshaker<'s, S> {
     /// stream is returned as well.
     pub fn new(stream: &'s mut S,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
-               server_longterm_pk: &[u8; sign::PUBLICKEYBYTES],
-               server_longterm_sk: &[u8; sign::SECRETKEYBYTES],
-               server_ephemeral_pk: &[u8; box_::PUBLICKEYBYTES],
-               server_ephemeral_sk: &[u8; box_::SECRETKEYBYTES])
+               server_longterm_pk: &sign::PublicKey,
+               server_longterm_sk: &sign::SecretKey,
+               server_ephemeral_pk: &box_::PublicKey,
+               server_ephemeral_sk: &box_::SecretKey)
                -> ServerHandshaker<'s, S> {
         ServerHandshaker(ServerHandshakerWithFilter::new(stream,
                                                          const_async_true,
                                                          network_identifier,
-                                                         server_longterm_pk,
-                                                         server_longterm_sk,
-                                                         server_ephemeral_pk,
-                                                         server_ephemeral_sk))
+                                                         &server_longterm_pk,
+                                                         &server_longterm_sk,
+                                                         &server_ephemeral_pk,
+                                                         &server_ephemeral_sk))
     }
 }
 
@@ -128,19 +128,19 @@ impl<'s, S, FilterFn, AsyncBool> ServerHandshakerWithFilter<'s, S, FilterFn, Asy
     pub fn new(stream: &'s mut S,
                filter_fn: FilterFn,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
-               server_longterm_pk: &[u8; sign::PUBLICKEYBYTES],
-               server_longterm_sk: &[u8; sign::SECRETKEYBYTES],
-               server_ephemeral_pk: &[u8; box_::PUBLICKEYBYTES],
-               server_ephemeral_sk: &[u8; box_::SECRETKEYBYTES])
+               server_longterm_pk: &sign::PublicKey,
+               server_longterm_sk: &sign::SecretKey,
+               server_ephemeral_pk: &box_::PublicKey,
+               server_ephemeral_sk: &box_::SecretKey)
                -> ServerHandshakerWithFilter<'s, S, FilterFn, AsyncBool> {
         ServerHandshakerWithFilter {
             stream: stream,
             filter: Some(FilterFun(filter_fn)),
             server: Server::new(network_identifier,
-                                server_longterm_pk,
-                                server_longterm_sk,
-                                server_ephemeral_pk,
-                                server_ephemeral_sk),
+                                &server_longterm_pk.0,
+                                &server_longterm_sk.0,
+                                &server_ephemeral_pk.0,
+                                &server_ephemeral_sk.0),
             state: ReadMsg1,
             data: [0; MSG3_BYTES],
             offset: 0,
