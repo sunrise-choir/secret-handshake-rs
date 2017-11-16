@@ -23,10 +23,10 @@ pub use client::*;
 pub use server::*;
 pub use crypto::{Outcome, NETWORK_IDENTIFIER_BYTES};
 
-// #[cfg(test)]
+#[cfg(test)]
 extern crate partial_io;
-// #[cfg(test)]
+#[cfg(test)]
 mod test;
-// #[cfg(test)]
+#[cfg(test)]
 #[macro_use]
 extern crate quickcheck;

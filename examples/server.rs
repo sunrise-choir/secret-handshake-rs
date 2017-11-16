@@ -66,10 +66,10 @@ fn main() {
             let secretbox::Key(decryption_key_bytes) = outcome.decryption_key();
             let secretbox::Nonce(decryption_nonce_bytes) = outcome.decryption_nonce();
 
-            stdout.write_all(&encryption_key_bytes);
-            stdout.write_all(&encryption_nonce_bytes);
-            stdout.write_all(&decryption_key_bytes);
-            stdout.write_all(&decryption_nonce_bytes);
+            let _ = stdout.write_all(&encryption_key_bytes).unwrap();
+            let _ = stdout.write_all(&encryption_nonce_bytes).unwrap();
+            let _ = stdout.write_all(&decryption_key_bytes).unwrap();
+            let _ = stdout.write_all(&decryption_nonce_bytes).unwrap();
         }
         Ok(Err(ServerHandshakeFailure::InvalidMsg1)) => {
             std::process::exit(1);
