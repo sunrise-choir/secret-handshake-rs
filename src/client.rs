@@ -1,9 +1,7 @@
 //! Asynchronously initiate handshakes.
 
-use std::{error, io, fmt};
-use std::error::Error;
 use std::mem::uninitialized;
-use std::fmt::Debug;
+use std::io;
 
 use sodiumoxide::crypto::{box_, sign};
 use futures::{Poll, Async, Future};

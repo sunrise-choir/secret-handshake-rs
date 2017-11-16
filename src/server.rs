@@ -3,9 +3,8 @@
 use std::{error, io, fmt};
 use std::error::Error;
 use std::mem::uninitialized;
-use std::fmt::Debug;
 
-use sodiumoxide::crypto::{box_, sign, auth};
+use sodiumoxide::crypto::{box_, sign};
 use futures::{Poll, Async, Future};
 use futures::future::{ok, FutureResult};
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -312,8 +311,8 @@ impl<FilterErr: error::Error> fmt::Display for ServerHandshakeError<FilterErr> {
 impl<FilterErr: error::Error> error::Error for ServerHandshakeError<FilterErr> {
     fn description(&self) -> &str {
         match *self {
-            ServerHandshakeError::IoError(ref err) => "IO error during handshake",
-            ServerHandshakeError::FilterFnError(ref err) => "Error during authentication",
+            ServerHandshakeError::IoError(_) => "IO error during handshake",
+            ServerHandshakeError::FilterFnError(_) => "Error during authentication",
         }
     }
 

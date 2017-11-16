@@ -2,14 +2,9 @@
 //! module directly.
 
 use std::mem::uninitialized;
-use std::io;
 
-use sodiumoxide::crypto::box_;
+use sodiumoxide::crypto::{box_, sign, scalarmult, secretbox, auth};
 use sodiumoxide::crypto::hash::sha256;
-use sodiumoxide::crypto::sign;
-use sodiumoxide::crypto::scalarmult;
-use sodiumoxide::crypto::secretbox;
-use sodiumoxide::crypto::auth;
 
 /// Length of a network identifier in bytes.
 pub const NETWORK_IDENTIFIER_BYTES: usize = 32;

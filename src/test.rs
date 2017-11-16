@@ -1,5 +1,4 @@
 use super::*;
-use super::crypto::*;
 use sodiumoxide::crypto::{box_, secretbox, sign, auth};
 use std::io::prelude::*;
 use std::io;
@@ -8,9 +7,8 @@ use futures::future::{ok, err, FutureResult};
 use void::Void;
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use partial_io::{PartialOp, PartialRead, PartialWrite, PartialAsyncRead, PartialAsyncWrite,
-                 PartialWithErrors};
-use partial_io::quickcheck_types::{GenInterruptedWouldBlock, GenWouldBlock};
+use partial_io::{PartialOp, PartialAsyncRead, PartialAsyncWrite, PartialWithErrors};
+use partial_io::quickcheck_types::GenWouldBlock;
 
 /// A duplex stream for testing: it records all writes to it, and reads return predefined data
 #[derive(Debug)]
