@@ -10,7 +10,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 use partial_io::{PartialOp, PartialRead, PartialWrite, PartialAsyncRead, PartialAsyncWrite,
                  PartialWithErrors};
-// use partial_io::quickcheck_types::{GenInterruptedWouldBlock, GenWouldBlock};
+use partial_io::quickcheck_types::{GenInterruptedWouldBlock, GenWouldBlock};
 
 /// A duplex stream for testing: it records all writes to it, and reads return predefined data
 #[derive(Debug)]
