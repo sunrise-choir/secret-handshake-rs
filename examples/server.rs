@@ -1,5 +1,5 @@
 #![feature(drop_types_in_const)]
-// This file serves both as an example of using the `ClientHandshaker` struct, and as the client test executable for the [shs1 testsuite](https://github.com/AljoschaMeyer/shs1-testsuite).
+// This file serves both as an example of using the `ServerHandshaker` struct, and as the server test executable for the [shs1 testsuite](https://github.com/AljoschaMeyer/shs1-testsuite).
 extern crate secret_handshake;
 extern crate futures;
 extern crate tokio_io;
@@ -13,34 +13,32 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use futures::{Poll, Future, Async};
 use secret_handshake::*;
 
-static CLIENT_LONGTERM_PK: sign::PublicKey =
-    sign::PublicKey([225, 162, 73, 136, 73, 119, 94, 84, 208, 102, 233, 120, 23, 46, 225, 245,
-                     198, 79, 176, 0, 151, 208, 70, 146, 111, 23, 94, 101, 25, 192, 30, 35]);
-static CLIENT_LONGTERM_SK: sign::SecretKey =
-    sign::SecretKey([243, 168, 6, 50, 44, 78, 192, 183, 210, 241, 189, 36, 183, 154, 132, 119,
-                     115, 84, 47, 151, 32, 32, 26, 237, 64, 180, 69, 20, 95, 133, 92, 176, 225,
-                     162, 73, 136, 73, 119, 94, 84, 208, 102, 233, 120, 23, 46, 225, 245, 198,
-                     79, 176, 0, 151, 208, 70, 146, 111, 23, 94, 101, 25, 192, 30, 35]);
-static CLIENT_EPHEMERAL_PK: box_::PublicKey =
-    box_::PublicKey([79, 79, 77, 238, 254, 215, 129, 197, 235, 41, 185, 208, 47, 32, 146, 37,
-                     255, 237, 208, 215, 182, 92, 201, 106, 85, 86, 157, 41, 53, 165, 177, 32]);
-static CLIENT_EPHEMERAL_SK: box_::SecretKey =
-    box_::SecretKey([80, 169, 55, 157, 134, 142, 219, 152, 125, 240, 174, 209, 225, 109, 46, 188,
-                     97, 224, 193, 187, 198, 58, 226, 193, 24, 235, 213, 214, 49, 55, 213, 104]);
+static SERVER_EPHEMERAL_PK: box_::PublicKey =
+    box_::PublicKey([166, 12, 63, 218, 235, 136, 61, 99, 232, 142, 165, 147, 88, 93, 79, 177, 23,
+                     148, 129, 57, 179, 24, 192, 174, 90, 62, 40, 83, 51, 9, 97, 82]);
+static SERVER_EPHEMERAL_SK: box_::SecretKey =
+    box_::SecretKey([176, 248, 210, 185, 226, 76, 162, 153, 239, 144, 57, 206, 218, 97, 2, 215,
+                     155, 5, 223, 189, 22, 28, 137, 85, 228, 233, 93, 79, 217, 203, 63, 125]);
 
 fn main() {
     // parse cli arguments
     let mut network_identifier = [0u8; NETWORK_IDENTIFIER_BYTES];
+    let mut server_longterm_sk_bytes = [0u8; sign::SECRETKEYBYTES];
     let mut server_longterm_pk_bytes = [0u8; sign::PUBLICKEYBYTES];
 
     let args: Vec<_> = env::args().collect();
     let network_identifier_vec = from_hex(&args[1]);
-    let server_longterm_pk_vec = from_hex(&args[2]);
+    let server_longterm_sk_vec = from_hex(&args[2]);
+    let server_longterm_pk_vec = from_hex(&args[3]);
 
     for i in 0..32 {
         network_identifier[i] = network_identifier_vec[i];
         server_longterm_pk_bytes[i] = server_longterm_pk_vec[i];
     }
+    for i in 0..sign::SECRETKEYBYTES {
+        server_longterm_sk_bytes[i] = server_longterm_sk_vec[i];
+    }
+    let server_longterm_sk = sign::SecretKey(server_longterm_sk_bytes);
     let server_longterm_pk = sign::PublicKey(server_longterm_pk_bytes);
 
     // Always initialize libsodium before using this crate.
@@ -52,13 +50,12 @@ fn main() {
     };
 
     // Set up the handshaker.
-    let handshaker = ClientHandshaker::new(&mut stream,
+    let handshaker = ServerHandshaker::new(&mut stream,
                                            &network_identifier,
-                                           &CLIENT_LONGTERM_PK,
-                                           &CLIENT_LONGTERM_SK,
-                                           &CLIENT_EPHEMERAL_PK,
-                                           &CLIENT_EPHEMERAL_SK,
-                                           &server_longterm_pk);
+                                           &server_longterm_pk,
+                                           &server_longterm_sk,
+                                           &SERVER_EPHEMERAL_PK,
+                                           &SERVER_EPHEMERAL_SK);
 
     match handshaker.wait() {
         Ok(Ok(outcome)) => {
@@ -74,11 +71,11 @@ fn main() {
             stdout.write_all(&decryption_key_bytes);
             stdout.write_all(&decryption_nonce_bytes);
         }
-        Ok(Err(ClientHandshakeFailure::InvalidMsg2)) => {
-            std::process::exit(2);
+        Ok(Err(ServerHandshakeFailure::InvalidMsg1)) => {
+            std::process::exit(1);
         }
-        Ok(Err(ClientHandshakeFailure::InvalidMsg4)) => {
-            std::process::exit(4);
+        Ok(Err(ServerHandshakeFailure::InvalidMsg3)) => {
+            std::process::exit(3);
         }
         Err(_) => panic!("stdin/stdout failed"),
     }
