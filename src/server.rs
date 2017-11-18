@@ -24,10 +24,6 @@ impl<'s, S: AsyncRead + AsyncWrite> ServerHandshaker<'s, S> {
     /// Creates a new ServerHandshakerWithFilter to accept a connection from a
     /// client which knows the server's public key and uses the right app key
     /// over the given `stream`.
-    ///
-    /// This consumes ownership of the stream, so that no other reads/writes can
-    /// interfere with the handshake. When the Future resolves, ownership of the
-    /// stream is returned as well.
     pub fn new(stream: &'s mut S,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
                server_longterm_pk: &sign::PublicKey,
@@ -45,6 +41,7 @@ impl<'s, S: AsyncRead + AsyncWrite> ServerHandshaker<'s, S> {
     }
 }
 
+/// Future implementation to asynchronously drive a handshake.
 impl<'s, S: AsyncRead + AsyncWrite> Future for ServerHandshaker<'s, S> {
     type Item = Result<Outcome, ServerHandshakeFailure>;
     type Error = io::Error;
@@ -120,10 +117,6 @@ impl<'s, S, FilterFn, AsyncBool> ServerHandshakerWithFilter<'s, S, FilterFn, Asy
     /// Once the client has revealed its longterm public key, `filter_fn` is
     /// invoked. If the returned `AsyncBool` resolves to `Ok(Async::Ready(false))`,
     /// the handshake is aborted.
-    ///
-    /// This consumes ownership of the stream, so that no other reads/writes can
-    /// interfere with the handshake. When the Future resolves, ownership of the
-    /// stream is returned as well.
     pub fn new(stream: &'s mut S,
                filter_fn: FilterFn,
                network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
@@ -288,7 +281,7 @@ pub enum ServerHandshakeError<FilterErr> {
     /// An IO error occured during reading or writing. The contained error is
     /// guaranteed to not have kind `WouldBlock`.
     IoError(io::Error),
-    /// The authentication function errored, the error is wrapped in this variant.
+    /// The filter function errored, the error is wrapped in this variant.
     FilterFnError(FilterErr),
 }
 

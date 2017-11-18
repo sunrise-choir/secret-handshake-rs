@@ -1,7 +1,7 @@
 #![feature(drop_types_in_const)] // only for tests
 
 //! Implementation of the [secret-handshake](https://github.com/auditdrivencrypto/secret-handshake)
-//! protocol.
+//! protocol version 1.
 //!
 //! This library uses libsodium internally. In application code, call
 //! [`sodiumoxide::init()`](https://dnaq.github.io/sodiumoxide/sodiumoxide/fn.init.html)
