@@ -15,7 +15,7 @@ tokio-io = "0.1.2"
 void = "1.0.2"
 
 [dev-dependencies]
-partial-io = { version = "0.2.3", features = ["quickcheck", "tokio"] }
+partial-io = { version = "0.2.5", features = ["quickcheck", "tokio"] }
 quickcheck = "0.4.1"
 
 [build-dependencies]
