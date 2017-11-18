@@ -4,6 +4,7 @@ use std::mem::uninitialized;
 use std::io;
 
 use sodiumoxide::crypto::{box_, sign};
+use sodiumoxide::utils::memzero;
 use futures::{Poll, Async, Future};
 use tokio_io::{AsyncRead, AsyncWrite};
 
@@ -54,7 +55,7 @@ impl<'s, S: AsyncRead + AsyncWrite> ClientHandshaker<'s, S> {
 /// Zero buffered handshake data on dropping.
 impl<'s, S> Drop for ClientHandshaker<'s, S> {
     fn drop(&mut self) {
-        self.data = [0; MSG3_BYTES];
+        memzero(&mut self.data);
     }
 }
 

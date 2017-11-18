@@ -5,6 +5,7 @@ use std::error::Error;
 use std::mem::uninitialized;
 
 use sodiumoxide::crypto::{box_, sign};
+use sodiumoxide::utils::memzero;
 use futures::{Poll, Async, Future};
 use futures::future::{ok, FutureResult};
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -101,7 +102,7 @@ pub struct ServerHandshakerWithFilter<'s, S: 's, FilterFn, AsyncBool> {
 /// Zero buffered handshake data on dropping.
 impl<'s, S, FilterFn, AsyncBool> Drop for ServerHandshakerWithFilter<'s, S, FilterFn, AsyncBool> {
     fn drop(&mut self) {
-        self.data = [0; MSG3_BYTES];
+        memzero(&mut self.data);
     }
 }
 

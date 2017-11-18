@@ -5,6 +5,7 @@ use std::mem::uninitialized;
 
 use sodiumoxide::crypto::{box_, sign, scalarmult, secretbox, auth};
 use sodiumoxide::crypto::hash::sha256;
+use sodiumoxide::utils::memzero;
 
 /// Length of a network identifier in bytes.
 pub const NETWORK_IDENTIFIER_BYTES: usize = 32;
@@ -36,10 +37,10 @@ pub struct Outcome {
 /// Zero out all sensitive data when going out of scope
 impl Drop for Outcome {
     fn drop(&mut self) {
-        self.encryption_key = [0; secretbox::KEYBYTES];
-        self.encryption_nonce = [0; secretbox::NONCEBYTES];
-        self.decryption_key = [0; secretbox::KEYBYTES];
-        self.decryption_nonce = [0; secretbox::NONCEBYTES];
+        memzero(&mut self.encryption_key);
+        memzero(&mut self.encryption_nonce);
+        memzero(&mut self.decryption_key);
+        memzero(&mut self.decryption_nonce);
     }
 }
 
