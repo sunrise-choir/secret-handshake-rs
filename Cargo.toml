@@ -19,4 +19,4 @@ partial-io = { version = "0.2.5", features = ["quickcheck", "tokio"] }
 quickcheck = "0.4.1"
 
 [build-dependencies]
-gcc = "0.3"
+cc = "1.0.0"
