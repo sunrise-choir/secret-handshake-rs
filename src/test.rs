@@ -8,7 +8,7 @@ use void::Void;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use partial_io::{PartialOp, PartialAsyncRead, PartialAsyncWrite, PartialWithErrors};
-use partial_io::quickcheck_types::{GenInterruptedWouldBlock, GenWouldBlock};
+use partial_io::quickcheck_types::GenInterruptedWouldBlock;
 
 /// A duplex stream for testing: it records all writes to it, and reads return predefined data
 #[derive(Debug)]
@@ -118,7 +118,6 @@ static EXP_CLIENT_PUB: sign::PublicKey =
 
 // A client handles partial reads/writes and WouldBlock errors on the underlying stream.
 quickcheck! {
-      // fn test_client_success_randomized_async(write_ops: PartialWithErrors<GenInterruptedWouldBlock>, read_ops: PartialWithErrors<GenInterruptedWouldBlock>) -> bool {
       fn test_client_success_randomized_async(write_ops: PartialWithErrors<GenInterruptedWouldBlock>, read_ops: PartialWithErrors<GenInterruptedWouldBlock>) -> bool {
           let data = [
             44,140,79,227,23,153,202,203,81,40,114,59,56,167,63,166,201,9,50,152,0,255,226,147,22,43,84,99,107,198,198,219,166,12,63,218,235,136,61,99,232,142,165,147,88,93,79,177,23,148,129,57,179,24,192,174,90,62,40,83,51,9,97,82, // end valid server challenge
@@ -520,8 +519,3 @@ fn test_filter_server_filter_error() {
         ServerHandshakeError::FilterFnError(e) => assert_eq!(e, ()),
     }
 }
-
-// TODO
-// - correctly handle reading/writing 0
-// - test partial reads/writes between 1 and Buffer_Size + 10
-// - quickcheck test that a ServerHandshaker and a ClientHandshaker can perform a handshake and obtain equal results

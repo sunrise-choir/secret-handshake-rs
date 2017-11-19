@@ -2,7 +2,7 @@
 
 use std::{error, io, fmt};
 use std::error::Error;
-use std::io::ErrorKind::{Interrupted, WouldBlock};
+use std::io::ErrorKind::{Interrupted, WouldBlock, WriteZero, UnexpectedEof};
 use std::mem::uninitialized;
 
 use sodiumoxide::crypto::{box_, sign};
@@ -157,9 +157,7 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
                 while self.offset < MSG1_BYTES {
                     match self.stream.read(&mut self.data[self.offset..MSG1_BYTES]) {
                         Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                                                      "failed to read msg1")
-                                               .into())
+                            return Err(io::Error::new(UnexpectedEof, "failed to read msg1").into())
                         }
                         Ok(read) => self.offset += read,
                         Err(e) => {
@@ -194,9 +192,7 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
                 while self.offset < MSG2_BYTES {
                     match self.stream.write(&self.data[self.offset..MSG2_BYTES]) {
                         Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::WriteZero,
-                                                      "failed to write msg2")
-                                               .into())
+                            return Err(io::Error::new(WriteZero, "failed to write msg2").into())
                         }
                         Ok(written) => self.offset += written,
                         Err(e) => {
@@ -231,9 +227,7 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
                 while self.offset < MSG3_BYTES {
                     match self.stream.read(&mut self.data[self.offset..MSG3_BYTES]) {
                         Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                                                      "failed to read msg3")
-                                               .into())
+                            return Err(io::Error::new(UnexpectedEof, "failed to read msg3").into())
                         }
                         Ok(read) => self.offset += read,
                         Err(e) => {
@@ -304,9 +298,7 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
                 while self.offset < MSG4_BYTES {
                     match self.stream.write(&self.data[self.offset..MSG4_BYTES]) {
                         Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::WriteZero,
-                                                      "failed to write msg4")
-                                               .into())
+                            return Err(io::Error::new(WriteZero, "failed to write msg4").into())
                         }
                         Ok(written) => self.offset += written,
                         Err(e) => {

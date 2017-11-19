@@ -1,8 +1,8 @@
 //! Asynchronously initiate handshakes.
 
 use std::mem::uninitialized;
-use std::io;
-use std::io::ErrorKind::{Interrupted, WouldBlock};
+use std::io::ErrorKind::{Interrupted, WouldBlock, WriteZero, UnexpectedEof};
+use std::io::Error;
 
 use sodiumoxide::crypto::{box_, sign};
 use sodiumoxide::utils::memzero;
@@ -63,17 +63,14 @@ impl<'s, S> Drop for ClientHandshaker<'s, S> {
 /// Future implementation to asynchronously drive a handshake.
 impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
     type Item = Result<Outcome, ClientHandshakeFailure>;
-    type Error = io::Error;
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         match self.state {
             WriteMsg1 => {
                 while self.offset < MSG1_BYTES {
                     match self.stream.write(&self.data[self.offset..MSG1_BYTES]) {
-                        Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::WriteZero,
-                                                      "failed to write msg1"))
-                        }
+                        Ok(0) => return Err(Error::new(WriteZero, "failed to write msg1")),
                         Ok(written) => self.offset += written,
                         Err(e) => {
                             match e.kind() {
@@ -106,10 +103,7 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
             ReadMsg2 => {
                 while self.offset < MSG2_BYTES {
                     match self.stream.read(&mut self.data[self.offset..MSG2_BYTES]) {
-                        Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                                                      "failed to read msg2"))
-                        }
+                        Ok(0) => return Err(Error::new(UnexpectedEof, "failed to read msg2")),
                         Ok(read) => self.offset += read,
                         Err(e) => {
                             match e.kind() {
@@ -138,10 +132,7 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
             WriteMsg3 => {
                 while self.offset < MSG3_BYTES {
                     match self.stream.write(&self.data[self.offset..MSG3_BYTES]) {
-                        Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::WriteZero,
-                                                      "failed to write msg3"))
-                        }
+                        Ok(0) => return Err(Error::new(WriteZero, "failed to write msg3")),
                         Ok(written) => self.offset += written,
                         Err(e) => {
                             match e.kind() {
@@ -174,10 +165,7 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
             ReadMsg4 => {
                 while self.offset < MSG4_BYTES {
                     match self.stream.read(&mut self.data[self.offset..MSG4_BYTES]) {
-                        Ok(0) => {
-                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                                                      "failed to read msg4"))
-                        }
+                        Ok(0) => return Err(Error::new(UnexpectedEof, "failed to read msg4")),
                         Ok(read) => self.offset += read,
                         Err(e) => {
                             match e.kind() {
