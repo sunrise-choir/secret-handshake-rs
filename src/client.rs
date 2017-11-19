@@ -2,6 +2,7 @@
 
 use std::mem::uninitialized;
 use std::io;
+use std::io::ErrorKind::{Interrupted, WouldBlock};
 
 use sodiumoxide::crypto::{box_, sign};
 use sodiumoxide::utils::memzero;
@@ -68,7 +69,16 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
         match self.state {
             WriteMsg1 => {
                 while self.offset < MSG1_BYTES {
-                    self.offset += try_nb!(self.stream.write(&self.data[self.offset..MSG1_BYTES]));
+                    match self.stream.write(&self.data[self.offset..MSG1_BYTES]) {
+                        Ok(written) => self.offset += written,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e),
+                            }
+                        }
+                    }
                 }
 
                 self.offset = 0;
@@ -77,7 +87,13 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
             }
 
             FlushMsg1 => {
-                try_nb!(self.stream.flush());
+                while let Err(e) = self.stream.flush() {
+                    match e.kind() {
+                        WouldBlock => return Ok(Async::NotReady),
+                        Interrupted => {}
+                        _ => return Err(e),
+                    }
+                }
 
                 self.state = ReadMsg2;
                 return self.poll();
@@ -85,8 +101,16 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
 
             ReadMsg2 => {
                 while self.offset < MSG2_BYTES {
-                    self.offset += try_nb!(self.stream.read(&mut self.data[self.offset..
-                                                                 MSG2_BYTES]));
+                    match self.stream.read(&mut self.data[self.offset..MSG2_BYTES]) {
+                        Ok(read) => self.offset += read,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e),
+                            }
+                        }
+                    }
                 }
 
                 if !self.client
@@ -105,7 +129,16 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
 
             WriteMsg3 => {
                 while self.offset < MSG3_BYTES {
-                    self.offset += try_nb!(self.stream.write(&self.data[self.offset..MSG3_BYTES]));
+                    match self.stream.write(&self.data[self.offset..MSG3_BYTES]) {
+                        Ok(written) => self.offset += written,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e),
+                            }
+                        }
+                    }
                 }
 
                 self.offset = 0;
@@ -114,7 +147,13 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
             }
 
             FlushMsg3 => {
-                try_nb!(self.stream.flush());
+                while let Err(e) = self.stream.flush() {
+                    match e.kind() {
+                        WouldBlock => return Ok(Async::NotReady),
+                        Interrupted => {}
+                        _ => return Err(e),
+                    }
+                }
 
                 self.state = ReadMsg4;
                 return self.poll();
@@ -122,8 +161,16 @@ impl<'s, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'s, S> {
 
             ReadMsg4 => {
                 while self.offset < MSG4_BYTES {
-                    self.offset += try_nb!(self.stream.read(&mut self.data[self.offset..
-                                                                 MSG4_BYTES]));
+                    match self.stream.read(&mut self.data[self.offset..MSG4_BYTES]) {
+                        Ok(read) => self.offset += read,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e),
+                            }
+                        }
+                    }
                 }
 
                 if !self.client

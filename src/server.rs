@@ -2,6 +2,7 @@
 
 use std::{error, io, fmt};
 use std::error::Error;
+use std::io::ErrorKind::{Interrupted, WouldBlock};
 use std::mem::uninitialized;
 
 use sodiumoxide::crypto::{box_, sign};
@@ -154,8 +155,16 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
         match self.state {
             ReadMsg1 => {
                 while self.offset < MSG1_BYTES {
-                    self.offset += try_nb!(self.stream.read(&mut self.data[self.offset..
-                                                                 MSG1_BYTES]));
+                    match self.stream.read(&mut self.data[self.offset..MSG1_BYTES]) {
+                        Ok(read) => self.offset += read,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e.into()),
+                            }
+                        }
+                    }
                 }
 
                 if !self.server
@@ -178,7 +187,16 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
 
             WriteMsg2 => {
                 while self.offset < MSG2_BYTES {
-                    self.offset += try_nb!(self.stream.write(&self.data[self.offset..MSG2_BYTES]));
+                    match self.stream.write(&self.data[self.offset..MSG2_BYTES]) {
+                        Ok(written) => self.offset += written,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e.into()),
+                            }
+                        }
+                    }
                 }
 
                 self.offset = 0;
@@ -187,7 +205,13 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
             }
 
             FlushMsg2 => {
-                try_nb!(self.stream.flush());
+                while let Err(e) = self.stream.flush() {
+                    match e.kind() {
+                        WouldBlock => return Ok(Async::NotReady),
+                        Interrupted => {}
+                        _ => return Err(e.into()),
+                    }
+                }
 
                 self.state = ReadMsg3;
                 return self.poll();
@@ -195,8 +219,16 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
 
             ReadMsg3 => {
                 while self.offset < MSG3_BYTES {
-                    self.offset += try_nb!(self.stream.read(&mut self.data[self.offset..
-                                                                 MSG3_BYTES]));
+                    match self.stream.read(&mut self.data[self.offset..MSG3_BYTES]) {
+                        Ok(read) => self.offset += read,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e.into()),
+                            }
+                        }
+                    }
                 }
 
                 if !self.server.verify_msg3(&self.data) {
@@ -255,7 +287,16 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
 
             WriteMsg4 => {
                 while self.offset < MSG4_BYTES {
-                    self.offset += try_nb!(self.stream.write(&self.data[self.offset..MSG4_BYTES]));
+                    match self.stream.write(&self.data[self.offset..MSG4_BYTES]) {
+                        Ok(written) => self.offset += written,
+                        Err(e) => {
+                            match e.kind() {
+                                WouldBlock => return Ok(Async::NotReady),
+                                Interrupted => {}
+                                _ => return Err(e.into()),
+                            }
+                        }
+                    }
                 }
 
                 self.offset = 0;
@@ -264,7 +305,13 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
             }
 
             FlushMsg4 => {
-                try_nb!(self.stream.flush());
+                while let Err(e) = self.stream.flush() {
+                    match e.kind() {
+                        WouldBlock => return Ok(Async::NotReady),
+                        Interrupted => {}
+                        _ => return Err(e.into()),
+                    }
+                }
 
                 let mut outcome = unsafe { uninitialized() };
                 self.server.outcome(&mut outcome);
