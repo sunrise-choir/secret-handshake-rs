@@ -156,6 +156,11 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
             ReadMsg1 => {
                 while self.offset < MSG1_BYTES {
                     match self.stream.read(&mut self.data[self.offset..MSG1_BYTES]) {
+                        Ok(0) => {
+                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
+                                                      "failed to read msg1")
+                                               .into())
+                        }
                         Ok(read) => self.offset += read,
                         Err(e) => {
                             match e.kind() {
@@ -188,6 +193,11 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
             WriteMsg2 => {
                 while self.offset < MSG2_BYTES {
                     match self.stream.write(&self.data[self.offset..MSG2_BYTES]) {
+                        Ok(0) => {
+                            return Err(io::Error::new(io::ErrorKind::WriteZero,
+                                                      "failed to write msg2")
+                                               .into())
+                        }
                         Ok(written) => self.offset += written,
                         Err(e) => {
                             match e.kind() {
@@ -220,6 +230,11 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
             ReadMsg3 => {
                 while self.offset < MSG3_BYTES {
                     match self.stream.read(&mut self.data[self.offset..MSG3_BYTES]) {
+                        Ok(0) => {
+                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
+                                                      "failed to read msg3")
+                                               .into())
+                        }
                         Ok(read) => self.offset += read,
                         Err(e) => {
                             match e.kind() {
@@ -288,6 +303,11 @@ impl<'s, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'s, S, Fi
             WriteMsg4 => {
                 while self.offset < MSG4_BYTES {
                     match self.stream.write(&self.data[self.offset..MSG4_BYTES]) {
+                        Ok(0) => {
+                            return Err(io::Error::new(io::ErrorKind::WriteZero,
+                                                      "failed to write msg4")
+                                               .into())
+                        }
                         Ok(written) => self.offset += written,
                         Err(e) => {
                             match e.kind() {
