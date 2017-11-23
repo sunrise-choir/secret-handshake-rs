@@ -1,5 +1,6 @@
 use super::*;
 use sodiumoxide::crypto::{box_, secretbox, sign, auth};
+use sodiumoxide::randombytes::randombytes_into;
 use std::io::prelude::*;
 use std::io;
 use futures::{Poll, Async, Future};
@@ -9,6 +10,47 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 use partial_io::{PartialOp, PartialAsyncRead, PartialAsyncWrite, PartialWithErrors};
 use partial_io::quickcheck_types::GenInterruptedWouldBlock;
+use quickcheck::{QuickCheck, StdGen, Gen, Arbitrary};
+use async_ringbuffer::*;
+use rand::Rng;
+
+/// Implements both Read and Write by delegating to a Read and a Write (of which
+/// it takes ownership).
+pub struct Duplex<R, W> {
+    r: R,
+    w: W,
+}
+
+impl<R, W> Duplex<R, W> {
+    /// Takes ownership of a Read and a Write and creates a new Duplex.
+    pub fn new(r: R, w: W) -> Duplex<R, W> {
+        Duplex { r, w }
+    }
+}
+
+impl<R, W: Write> Write for Duplex<R, W> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
+        self.w.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<(), io::Error> {
+        self.w.flush()
+    }
+}
+
+impl<R, W: AsyncWrite> AsyncWrite for Duplex<R, W> {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        self.w.shutdown()
+    }
+}
+
+impl<R: Read, W> Read for Duplex<R, W> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
+        self.r.read(buf)
+    }
+}
+
+impl<R: AsyncRead, W> AsyncRead for Duplex<R, W> {}
 
 /// A duplex stream for testing: it records all writes to it, and reads return predefined data
 #[derive(Debug)]
@@ -115,6 +157,73 @@ static EXP_SERVER_DEC_NONCE: secretbox::Nonce =
 static EXP_CLIENT_PUB: sign::PublicKey =
     sign::PublicKey([225, 162, 73, 136, 73, 119, 94, 84, 208, 102, 233, 120, 23, 46, 225, 245,
                      198, 79, 176, 0, 151, 208, 70, 146, 111, 23, 94, 101, 25, 192, 30, 35]);
+
+#[test]
+// A client and a server can perform a handshake.
+fn test_success() {
+    let rng = StdGen::new(rand::thread_rng(), 200);
+    let mut quickcheck = QuickCheck::new().gen(rng).tests(1000);
+    quickcheck.quickcheck(success as
+                          fn(PartialWithErrors<GenInterruptedWouldBlock>,
+                             PartialWithErrors<GenInterruptedWouldBlock>,
+                             PartialWithErrors<GenInterruptedWouldBlock>,
+                             PartialWithErrors<GenInterruptedWouldBlock>)
+                             -> bool);
+}
+
+fn success(write_ops_c: PartialWithErrors<GenInterruptedWouldBlock>,
+           read_ops_c: PartialWithErrors<GenInterruptedWouldBlock>,
+           write_ops_s: PartialWithErrors<GenInterruptedWouldBlock>,
+           read_ops_s: PartialWithErrors<GenInterruptedWouldBlock>)
+           -> bool {
+    let (writer_a, reader_a) = ring_buffer(100);
+    let (writer_b, reader_b) = ring_buffer(100);
+
+    let mut client_duplex = Duplex::new(PartialAsyncRead::new(reader_a, read_ops_c),
+                                        PartialAsyncWrite::new(writer_b, write_ops_c));
+    let mut server_duplex = Duplex::new(PartialAsyncRead::new(reader_b, read_ops_s),
+                                        PartialAsyncWrite::new(writer_a, write_ops_s));
+
+    let mut network_identifier = [0u8; NETWORK_IDENTIFIER_BYTES];
+    randombytes_into(&mut network_identifier[0..32]);
+    let (client_longterm_pk, client_longterm_sk) = sign::gen_keypair();
+    let (client_ephemeral_pk, client_ephemeral_sk) = box_::gen_keypair();
+    let (server_longterm_pk, server_longterm_sk) = sign::gen_keypair();
+    let (server_ephemeral_pk, server_ephemeral_sk) = box_::gen_keypair();
+
+    let mut client = ClientHandshaker::new(&mut client_duplex,
+                                           &network_identifier,
+                                           &client_longterm_pk,
+                                           &client_longterm_sk,
+                                           &client_ephemeral_pk,
+                                           &client_ephemeral_sk,
+                                           &server_longterm_pk);
+
+    let mut server = ServerHandshaker::new(&mut server_duplex,
+                                           &network_identifier,
+                                           &server_longterm_pk,
+                                           &server_longterm_sk,
+                                           &server_ephemeral_pk,
+                                           &server_ephemeral_sk);
+
+    let (client_result, server_result) = client.join(server).wait().unwrap();
+    let client_outcome = client_result.unwrap();
+    let server_outcome = server_result.unwrap();
+
+    assert_eq!(client_outcome.encryption_key(),
+               server_outcome.decryption_key());
+    assert_eq!(client_outcome.encryption_nonce(),
+               server_outcome.decryption_nonce());
+    assert_eq!(client_outcome.decryption_key(),
+               server_outcome.encryption_key());
+    assert_eq!(client_outcome.decryption_nonce(),
+               server_outcome.encryption_nonce());
+
+    assert_eq!(client_outcome.peer_longterm_pk(), server_longterm_pk);
+    assert_eq!(server_outcome.peer_longterm_pk(), client_longterm_pk);
+
+    return true;
+}
 
 // A client handles partial reads/writes and WouldBlock errors on the underlying stream.
 quickcheck! {

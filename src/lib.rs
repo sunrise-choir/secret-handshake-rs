@@ -29,3 +29,7 @@ mod test;
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
+#[cfg(test)]
+extern crate async_ringbuffer;
+#[cfg(test)]
+extern crate rand;
