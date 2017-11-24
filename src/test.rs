@@ -164,20 +164,24 @@ fn test_success() {
     let rng = StdGen::new(rand::thread_rng(), 200);
     let mut quickcheck = QuickCheck::new().gen(rng).tests(1000);
     quickcheck.quickcheck(success as
-                          fn(PartialWithErrors<GenInterruptedWouldBlock>,
+                          fn(usize,
+                             usize,
+                             PartialWithErrors<GenInterruptedWouldBlock>,
                              PartialWithErrors<GenInterruptedWouldBlock>,
                              PartialWithErrors<GenInterruptedWouldBlock>,
                              PartialWithErrors<GenInterruptedWouldBlock>)
                              -> bool);
 }
 
-fn success(write_ops_c: PartialWithErrors<GenInterruptedWouldBlock>,
+fn success(buf_size_a: usize,
+           buf_size_b: usize,
+           write_ops_c: PartialWithErrors<GenInterruptedWouldBlock>,
            read_ops_c: PartialWithErrors<GenInterruptedWouldBlock>,
            write_ops_s: PartialWithErrors<GenInterruptedWouldBlock>,
            read_ops_s: PartialWithErrors<GenInterruptedWouldBlock>)
            -> bool {
-    let (writer_a, reader_a) = ring_buffer(100);
-    let (writer_b, reader_b) = ring_buffer(100);
+    let (writer_a, reader_a) = ring_buffer(buf_size_a + 1);
+    let (writer_b, reader_b) = ring_buffer(buf_size_b + 1);
 
     let mut client_duplex = Duplex::new(PartialAsyncRead::new(reader_a, read_ops_c),
                                         PartialAsyncWrite::new(writer_b, write_ops_c));
