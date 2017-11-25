@@ -13,6 +13,8 @@ extern crate libc;
 extern crate futures;
 extern crate tokio_io;
 extern crate void;
+#[macro_use]
+extern crate atm_io_utils;
 
 pub mod crypto;
 mod client;

@@ -4,13 +4,15 @@ extern crate secret_handshake;
 extern crate futures;
 extern crate tokio_io;
 extern crate sodiumoxide;
+extern crate atm_io_utils;
 
 use std::env;
-use std::io::{Read, Write};
+use std::io::Write;
 
 use sodiumoxide::crypto::{box_, sign, secretbox};
-use tokio_io::{AsyncRead, AsyncWrite};
-use futures::{Poll, Future, Async};
+use tokio_io::io::AllowStdIo;
+use futures::Future;
+use atm_io_utils::Duplex;
 use secret_handshake::*;
 
 static CLIENT_LONGTERM_PK: sign::PublicKey =
@@ -46,10 +48,7 @@ fn main() {
     // Always initialize libsodium before using this crate.
     assert!(sodiumoxide::init(), 1);
 
-    let mut stream = Duplex {
-        r: std::io::stdin(),
-        w: std::io::stdout(),
-    };
+    let mut stream = AllowStdIo::new(Duplex::new(std::io::stdin(), std::io::stdout()));
 
     // Set up the handshaker.
     let handshaker = ClientHandshaker::new(&mut stream,
@@ -81,36 +80,6 @@ fn main() {
             std::process::exit(4);
         }
         Err(_) => panic!("stdin/stdout failed"),
-    }
-}
-
-// Hacky way of getting a stream from stdin and stdout.
-struct Duplex<R: Read, W: Write> {
-    r: R,
-    w: W,
-}
-
-impl<R: Read, W: Write> Read for Duplex<R, W> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
-        self.r.read(buf)
-    }
-}
-
-impl<R: Read, W: Write> AsyncRead for Duplex<R, W> {}
-
-impl<R: Read, W: Write> Write for Duplex<R, W> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        self.w.write(buf)
-    }
-
-    fn flush(&mut self) -> Result<(), std::io::Error> {
-        self.w.flush()
-    }
-}
-
-impl<R: Read, W: Write> AsyncWrite for Duplex<R, W> {
-    fn shutdown(&mut self) -> Poll<(), std::io::Error> {
-        Ok(Async::Ready(()))
     }
 }
 
