@@ -1,6 +1,6 @@
 [package]
 name = "secret_handshake"
-version = "1.0.3"
+version = "1.0.4"
 authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
 description = "Implementation of the secret-handshake protocol."
 repository = "https://github.com/AljoschaMeyer/secret-handshake-rs"
