@@ -6,6 +6,7 @@ description = "Implementation of the secret-handshake protocol."
 repository = "https://github.com/AljoschaMeyer/secret-handshake-rs"
 readme = "README.md"
 license = "GPL-3.0"
+repository = "https://github.com/AljoschaMeyer/secret-handshake-rs"
 
 [dependencies]
 sodiumoxide = "0.0.15"
