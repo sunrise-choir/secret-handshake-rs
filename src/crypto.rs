@@ -2,6 +2,7 @@
 //! module directly.
 
 use std::mem::uninitialized;
+use std::marker::PhantomData;
 
 use sodiumoxide::crypto::{box_, sign, scalarmult, secretbox, auth};
 use sodiumoxide::crypto::hash::sha256;
@@ -74,7 +75,7 @@ impl Outcome {
 /// The struct used in the C code to perform the client side of a handshake.
 #[repr(C)]
 // #[derive(Debug)]
-pub struct Client {
+pub struct Client<'a> {
     // inputs
     app: *const [u8; auth::KEYBYTES],
     pub_: *const [u8; sign::PUBLICKEYBYTES],
@@ -88,9 +89,10 @@ pub struct Client {
     hello: [u8; sign::SIGNATUREBYTES + sign::PUBLICKEYBYTES],
     shared_hash: [u8; sha256::DIGESTBYTES],
     server_eph_pub: [u8; box_::PUBLICKEYBYTES],
+    _lifetime: PhantomData<&'a [u8; 0]>,
 }
 
-impl Client {
+impl<'a> Client<'a> {
     /// Creates and initializes a new `Client`.
     pub fn new(app: *const [u8; auth::KEYBYTES],
                pub_: *const [u8; sign::PUBLICKEYBYTES],
@@ -98,7 +100,7 @@ impl Client {
                eph_pub: *const [u8; box_::PUBLICKEYBYTES],
                eph_sec: *const [u8; box_::SECRETKEYBYTES],
                server_pub: *const [u8; sign::PUBLICKEYBYTES])
-               -> Client {
+               -> Client<'a> {
         Client {
             app,
             pub_,
@@ -111,6 +113,7 @@ impl Client {
             hello: unsafe { uninitialized() },
             shared_hash: unsafe { uninitialized() },
             server_eph_pub: unsafe { uninitialized() },
+            _lifetime: PhantomData,
         }
     }
 
@@ -146,7 +149,7 @@ impl Client {
 }
 
 /// Zero out all sensitive data when going out of scope.
-impl Drop for Client {
+impl<'a> Drop for Client<'a> {
     fn drop(&mut self) {
         self.clean();
     }
@@ -155,7 +158,7 @@ impl Drop for Client {
 /// The struct used in the C code to perform the server side of a handshake.
 #[repr(C)]
 // #[derive(Debug)]
-pub struct Server {
+pub struct Server<'a> {
     app: *const [u8; auth::KEYBYTES],
     pub_: *const [u8; sign::PUBLICKEYBYTES],
     sec: *const [u8; sign::SECRETKEYBYTES],
@@ -167,16 +170,17 @@ pub struct Server {
     client_eph_pub: [u8; box_::PUBLICKEYBYTES],
     client_pub: [u8; sign::PUBLICKEYBYTES],
     box_sec: [u8; sha256::DIGESTBYTES],
+    _lifetime: PhantomData<&'a [u8; 0]>,
 }
 
-impl Server {
+impl<'a> Server<'a> {
     /// Creates and initializes a new `Server`.
     pub fn new(app: *const [u8; auth::KEYBYTES],
                pub_: *const [u8; sign::PUBLICKEYBYTES],
                sec: *const [u8; sign::SECRETKEYBYTES],
                eph_pub: *const [u8; box_::PUBLICKEYBYTES],
                eph_sec: *const [u8; box_::SECRETKEYBYTES])
-               -> Server {
+               -> Server<'a> {
         Server {
             app,
             pub_,
@@ -188,6 +192,7 @@ impl Server {
             client_eph_pub: unsafe { uninitialized() },
             client_pub: unsafe { uninitialized() },
             box_sec: unsafe { uninitialized() },
+            _lifetime: PhantomData,
         }
     }
 
@@ -250,7 +255,7 @@ extern "C" {
 }
 
 /// Zero out all sensitive data when going out of scope.
-impl Drop for Server {
+impl<'a> Drop for Server<'a> {
     fn drop(&mut self) {
         self.clean();
     }

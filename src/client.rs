@@ -12,25 +12,25 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use crypto::*;
 
 /// Performs the client side of a handshake.
-pub struct ClientHandshaker<S> {
+pub struct ClientHandshaker<'a, S> {
     stream: Option<S>,
-    client: Client,
+    client: Client<'a>,
     state: State,
     data: [u8; MSG3_BYTES], // used to hold and cache the results of `client.create_client_challenge` and `client.create_client_auth`, and any data read from the server
     offset: usize, // offset into the data array at which to read/write
 }
 
-impl<S: AsyncRead + AsyncWrite> ClientHandshaker<S> {
+impl<'a, S: AsyncRead + AsyncWrite> ClientHandshaker<'a, S> {
     /// Creates a new ClientHandshaker to connect to a server with known public key
     /// and app key over the given `stream`.
     pub fn new(stream: S,
-               network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
-               client_longterm_pk: &sign::PublicKey,
-               client_longterm_sk: &sign::SecretKey,
-               client_ephemeral_pk: &box_::PublicKey,
-               client_ephemeral_sk: &box_::SecretKey,
-               server_longterm_pk: &sign::PublicKey)
-               -> ClientHandshaker<S> {
+               network_identifier: &'a [u8; NETWORK_IDENTIFIER_BYTES],
+               client_longterm_pk: &'a sign::PublicKey,
+               client_longterm_sk: &'a sign::SecretKey,
+               client_ephemeral_pk: &'a box_::PublicKey,
+               client_ephemeral_sk: &'a box_::SecretKey,
+               server_longterm_pk: &'a sign::PublicKey)
+               -> ClientHandshaker<'a, S> {
         let mut ret = ClientHandshaker {
             stream: Some(stream),
             client: Client::new(network_identifier,
@@ -54,14 +54,14 @@ impl<S: AsyncRead + AsyncWrite> ClientHandshaker<S> {
 }
 
 /// Zero buffered handshake data on dropping.
-impl<S> Drop for ClientHandshaker<S> {
+impl<'a, S> Drop for ClientHandshaker<'a, S> {
     fn drop(&mut self) {
         memzero(&mut self.data);
     }
 }
 
 /// Future implementation to asynchronously drive a handshake.
-impl<S: AsyncRead + AsyncWrite> Future for ClientHandshaker<S> {
+impl<'a, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'a, S> {
     type Item = (Result<Outcome, ClientHandshakeFailure>, S);
     type Error = (Error, S);
 
