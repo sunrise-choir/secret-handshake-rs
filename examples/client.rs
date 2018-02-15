@@ -1,4 +1,3 @@
-#![feature(drop_types_in_const)]
 // This file serves both as an example of using the `ClientHandshaker` struct, and as the client test executable for the [shs1 testsuite](https://github.com/AljoschaMeyer/shs1-testsuite).
 extern crate secret_handshake;
 extern crate futures;
@@ -48,7 +47,7 @@ fn main() {
     // Always initialize libsodium before using this crate.
     assert!(sodiumoxide::init(), 1);
 
-    let mut stream = AllowStdIo::new(Duplex::new(std::io::stdin(), std::io::stdout()));
+    let stream = AllowStdIo::new(Duplex::new(std::io::stdin(), std::io::stdout()));
 
     // Set up the handshaker.
     let handshaker = ClientHandshaker::new(stream,

@@ -1,5 +1,3 @@
-#![feature(drop_types_in_const)] // only for tests
-
 //! Implementation of the [secret-handshake](https://github.com/auditdrivencrypto/secret-handshake)
 //! protocol version 1.
 //!
@@ -13,7 +11,6 @@ extern crate libc;
 extern crate futures;
 extern crate tokio_io;
 extern crate void;
-#[macro_use]
 extern crate atm_io_utils;
 
 pub mod crypto;

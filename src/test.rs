@@ -115,10 +115,10 @@ fn success(buf_size_a: usize,
     let (writer_a, reader_a) = ring_buffer(buf_size_a + 1);
     let (writer_b, reader_b) = ring_buffer(buf_size_b + 1);
 
-    let mut client_duplex = Duplex::new(PartialAsyncRead::new(reader_a, read_ops_c),
-                                        PartialAsyncWrite::new(writer_b, write_ops_c));
-    let mut server_duplex = Duplex::new(PartialAsyncRead::new(reader_b, read_ops_s),
-                                        PartialAsyncWrite::new(writer_a, write_ops_s));
+    let client_duplex = Duplex::new(PartialAsyncRead::new(reader_a, read_ops_c),
+                                    PartialAsyncWrite::new(writer_b, write_ops_c));
+    let server_duplex = Duplex::new(PartialAsyncRead::new(reader_b, read_ops_s),
+                                    PartialAsyncWrite::new(writer_a, write_ops_s));
 
     let mut network_identifier = [0u8; NETWORK_IDENTIFIER_BYTES];
     randombytes_into(&mut network_identifier[0..32]);
@@ -127,7 +127,7 @@ fn success(buf_size_a: usize,
     let (server_longterm_pk, server_longterm_sk) = sign::gen_keypair();
     let (server_ephemeral_pk, server_ephemeral_sk) = box_::gen_keypair();
 
-    let client = ClientHandshaker::new(&mut client_duplex,
+    let client = ClientHandshaker::new(client_duplex,
                                        &network_identifier,
                                        &client_longterm_pk,
                                        &client_longterm_sk,
@@ -135,7 +135,7 @@ fn success(buf_size_a: usize,
                                        &client_ephemeral_sk,
                                        &server_longterm_pk);
 
-    let server = ServerHandshaker::new(&mut server_duplex,
+    let server = ServerHandshaker::new(server_duplex,
                                        &network_identifier,
                                        &server_longterm_pk,
                                        &server_longterm_sk,
@@ -167,9 +167,9 @@ quickcheck! {
           let mut stream = MockDuplex::new();
           stream.add_read_data(&SERVER_MSGS[..]);
           let stream = PartialAsyncWrite::new(stream, write_ops);
-          let mut stream = PartialAsyncRead::new(stream, read_ops);
+          let stream = PartialAsyncRead::new(stream, read_ops);
 
-          let client = ClientHandshaker::new(&mut stream,
+          let client = ClientHandshaker::new(stream,
                                                  &APP,
                                                  &CLIENT_PUB,
                                                  &CLIENT_SEC,
@@ -215,9 +215,9 @@ fn test_client_write0_msg1() {
     stream.add_read_data(&SERVER_MSGS[..]);
     let write_ops = vec![PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, write_ops);
-    let mut stream = PartialAsyncRead::new(stream, vec![]);
+    let stream = PartialAsyncRead::new(stream, vec![]);
 
-    let client = ClientHandshaker::new(&mut stream,
+    let client = ClientHandshaker::new(stream,
                                        &APP,
                                        &CLIENT_PUB,
                                        &CLIENT_SEC,
@@ -259,9 +259,9 @@ fn test_client_write0_msg3() {
                          PartialOp::Limited(8),
                          PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, write_ops);
-    let mut stream = PartialAsyncRead::new(stream, vec![]);
+    let stream = PartialAsyncRead::new(stream, vec![]);
 
-    let client = ClientHandshaker::new(&mut stream,
+    let client = ClientHandshaker::new(stream,
                                        &APP,
                                        &CLIENT_PUB,
                                        &CLIENT_SEC,
@@ -282,9 +282,9 @@ fn test_client_read0_msg4() {
                         PartialOp::Limited(8),
                         PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, vec![]);
-    let mut stream = PartialAsyncRead::new(stream, read_ops);
+    let stream = PartialAsyncRead::new(stream, read_ops);
 
-    let client = ClientHandshaker::new(&mut stream,
+    let client = ClientHandshaker::new(stream,
                                        &APP,
                                        &CLIENT_PUB,
                                        &CLIENT_SEC,
@@ -302,9 +302,9 @@ quickcheck! {
             let mut stream = MockDuplex::new();
             stream.add_read_data(&CLIENT_MSGS[..]);
             let stream = PartialAsyncWrite::new(stream, write_ops);
-            let mut stream = PartialAsyncRead::new(stream, read_ops);
+            let stream = PartialAsyncRead::new(stream, read_ops);
 
-            let server = ServerHandshaker::new(&mut stream,
+            let server = ServerHandshaker::new(stream,
                                                &APP,
                                                &SERVER_PUB,
                                                &SERVER_SEC,
@@ -329,9 +329,9 @@ fn test_server_io_error() {
     let read_ops = vec![PartialOp::Unlimited,
                         PartialOp::Err(io::ErrorKind::NotFound)];
     let stream = PartialAsyncWrite::new(stream, vec![]);
-    let mut stream = PartialAsyncRead::new(stream, read_ops);
+    let stream = PartialAsyncRead::new(stream, read_ops);
 
-    let server = ServerHandshaker::new(&mut stream,
+    let server = ServerHandshaker::new(stream,
                                        &APP,
                                        &SERVER_PUB,
                                        &SERVER_SEC,
@@ -348,9 +348,9 @@ fn test_server_read0_msg1() {
     stream.add_read_data(&CLIENT_MSGS[..]);
     let read_ops = vec![PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, vec![]);
-    let mut stream = PartialAsyncRead::new(stream, read_ops);
+    let stream = PartialAsyncRead::new(stream, read_ops);
 
-    let server = ServerHandshaker::new(&mut stream,
+    let server = ServerHandshaker::new(stream,
                                        &APP,
                                        &SERVER_PUB,
                                        &SERVER_SEC,
@@ -368,9 +368,9 @@ fn test_server_write0_msg2() {
     stream.add_read_data(&CLIENT_MSGS[..]);
     let write_ops = vec![PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, write_ops);
-    let mut stream = PartialAsyncRead::new(stream, vec![]);
+    let stream = PartialAsyncRead::new(stream, vec![]);
 
-    let server = ServerHandshaker::new(&mut stream,
+    let server = ServerHandshaker::new(stream,
                                        &APP,
                                        &SERVER_PUB,
                                        &SERVER_SEC,
@@ -390,9 +390,9 @@ fn test_server_read0_msg3() {
                         PartialOp::Limited(8),
                         PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, vec![]);
-    let mut stream = PartialAsyncRead::new(stream, read_ops);
+    let stream = PartialAsyncRead::new(stream, read_ops);
 
-    let server = ServerHandshaker::new(&mut stream,
+    let server = ServerHandshaker::new(stream,
                                        &APP,
                                        &SERVER_PUB,
                                        &SERVER_SEC,
@@ -412,9 +412,9 @@ fn test_server_write0_msg4() {
                          PartialOp::Limited(8),
                          PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, write_ops);
-    let mut stream = PartialAsyncRead::new(stream, vec![]);
+    let stream = PartialAsyncRead::new(stream, vec![]);
 
-    let server = ServerHandshaker::new(&mut stream,
+    let server = ServerHandshaker::new(stream,
                                        &APP,
                                        &SERVER_PUB,
                                        &SERVER_SEC,
@@ -435,7 +435,7 @@ fn test_filter_server_accept() {
     let mut stream = MockDuplex::new();
     stream.add_read_data(&CLIENT_MSGS[..]);
 
-    let server = ServerHandshakerWithFilter::new(&mut stream,
+    let server = ServerHandshakerWithFilter::new(stream,
                                                  const_async_true,
                                                  &APP,
                                                  &SERVER_PUB,
@@ -461,7 +461,7 @@ fn test_filter_server_reject() {
     let mut stream = MockDuplex::new();
     stream.add_read_data(&CLIENT_MSGS[..]);
 
-    let server = ServerHandshakerWithFilter::new(&mut stream,
+    let server = ServerHandshakerWithFilter::new(stream,
                                                  const_async_false,
                                                  &APP,
                                                  &SERVER_PUB,
@@ -481,9 +481,9 @@ fn test_filter_server_io_error() {
     let read_ops = vec![PartialOp::Unlimited,
                         PartialOp::Err(io::ErrorKind::NotFound)];
     let stream = PartialAsyncWrite::new(stream, vec![]);
-    let mut stream = PartialAsyncRead::new(stream, read_ops);
+    let stream = PartialAsyncRead::new(stream, read_ops);
 
-    let server = ServerHandshakerWithFilter::new(&mut stream,
+    let server = ServerHandshakerWithFilter::new(stream,
                                                  const_async_true,
                                                  &APP,
                                                  &SERVER_PUB,
@@ -507,7 +507,7 @@ fn test_filter_server_filter_error() {
     let mut stream = MockDuplex::new();
     stream.add_read_data(&CLIENT_MSGS[..]);
 
-    let server = ServerHandshakerWithFilter::new(&mut stream,
+    let server = ServerHandshakerWithFilter::new(stream,
                                                  const_async_error,
                                                  &APP,
                                                  &SERVER_PUB,
