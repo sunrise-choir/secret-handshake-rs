@@ -142,7 +142,7 @@ fn success(buf_size_a: usize,
                                        &server_ephemeral_pk,
                                        &server_ephemeral_sk);
 
-    let (client_result, server_result) = client.join(server).wait().unwrap();
+    let ((client_result, _), (server_result, _)) = client.join(server).wait().ok().unwrap();
     let client_outcome = client_result.unwrap();
     let server_outcome = server_result.unwrap();
 
@@ -177,7 +177,7 @@ quickcheck! {
                                                  &CLIENT_EPH_SEC,
                                                  &SERVER_PUB);
 
-          let outcome = client.wait().unwrap().unwrap();
+          let outcome = client.wait().unwrap().0.unwrap();
           assert_eq!(outcome.encryption_key(), EXP_CLIENT_ENC_KEY);
           assert_eq!(outcome.encryption_nonce(), EXP_CLIENT_ENC_NONCE);
           assert_eq!(outcome.decryption_key(), EXP_CLIENT_DEC_KEY);
@@ -195,9 +195,9 @@ fn test_client_io_error() {
     let read_ops = vec![PartialOp::Unlimited,
                         PartialOp::Err(io::ErrorKind::NotFound)];
     let stream = PartialAsyncWrite::new(stream, vec![]);
-    let mut stream = PartialAsyncRead::new(stream, read_ops);
+    let stream = PartialAsyncRead::new(stream, read_ops);
 
-    let client = ClientHandshaker::new(&mut stream,
+    let client = ClientHandshaker::new(stream,
                                        &APP,
                                        &CLIENT_PUB,
                                        &CLIENT_SEC,
@@ -205,7 +205,7 @@ fn test_client_io_error() {
                                        &CLIENT_EPH_SEC,
                                        &SERVER_PUB);
 
-    assert_eq!(client.wait().unwrap_err().kind(), io::ErrorKind::NotFound);
+    assert_eq!(client.wait().unwrap_err().0.kind(), io::ErrorKind::NotFound);
 }
 
 #[test]
@@ -225,7 +225,8 @@ fn test_client_write0_msg1() {
                                        &CLIENT_EPH_SEC,
                                        &SERVER_PUB);
 
-    assert_eq!(client.wait().unwrap_err().kind(), io::ErrorKind::WriteZero);
+    assert_eq!(client.wait().unwrap_err().0.kind(),
+               io::ErrorKind::WriteZero);
 }
 
 #[test]
@@ -235,9 +236,9 @@ fn test_client_read0_msg2() {
     stream.add_read_data(&SERVER_MSGS[..]);
     let read_ops = vec![PartialOp::Limited(0)];
     let stream = PartialAsyncWrite::new(stream, vec![]);
-    let mut stream = PartialAsyncRead::new(stream, read_ops);
+    let stream = PartialAsyncRead::new(stream, read_ops);
 
-    let client = ClientHandshaker::new(&mut stream,
+    let client = ClientHandshaker::new(stream,
                                        &APP,
                                        &CLIENT_PUB,
                                        &CLIENT_SEC,
@@ -245,7 +246,7 @@ fn test_client_read0_msg2() {
                                        &CLIENT_EPH_SEC,
                                        &SERVER_PUB);
 
-    assert_eq!(client.wait().unwrap_err().kind(),
+    assert_eq!(client.wait().unwrap_err().0.kind(),
                io::ErrorKind::UnexpectedEof);
 }
 
@@ -268,7 +269,8 @@ fn test_client_write0_msg3() {
                                        &CLIENT_EPH_SEC,
                                        &SERVER_PUB);
 
-    assert_eq!(client.wait().unwrap_err().kind(), io::ErrorKind::WriteZero);
+    assert_eq!(client.wait().unwrap_err().0.kind(),
+               io::ErrorKind::WriteZero);
 }
 
 #[test]
@@ -290,7 +292,7 @@ fn test_client_read0_msg4() {
                                        &CLIENT_EPH_SEC,
                                        &SERVER_PUB);
 
-    assert_eq!(client.wait().unwrap_err().kind(),
+    assert_eq!(client.wait().unwrap_err().0.kind(),
                io::ErrorKind::UnexpectedEof);
 }
 
@@ -309,7 +311,7 @@ quickcheck! {
                                                &SERVER_EPH_PUB,
                                                &SERVER_EPH_SEC);
 
-           let outcome = server.wait().unwrap().unwrap();
+           let outcome = server.wait().unwrap().0.unwrap();
            assert_eq!(outcome.encryption_key(), EXP_SERVER_ENC_KEY);
            assert_eq!(outcome.encryption_nonce(), EXP_SERVER_ENC_NONCE);
            assert_eq!(outcome.decryption_key(), EXP_SERVER_DEC_KEY);
@@ -336,7 +338,7 @@ fn test_server_io_error() {
                                        &SERVER_EPH_PUB,
                                        &SERVER_EPH_SEC);
 
-    assert_eq!(server.wait().unwrap_err().kind(), io::ErrorKind::NotFound);
+    assert_eq!(server.wait().unwrap_err().0.kind(), io::ErrorKind::NotFound);
 }
 
 #[test]
@@ -355,7 +357,7 @@ fn test_server_read0_msg1() {
                                        &SERVER_EPH_PUB,
                                        &SERVER_EPH_SEC);
 
-    assert_eq!(server.wait().unwrap_err().kind(),
+    assert_eq!(server.wait().unwrap_err().0.kind(),
                io::ErrorKind::UnexpectedEof);
 }
 
@@ -375,7 +377,8 @@ fn test_server_write0_msg2() {
                                        &SERVER_EPH_PUB,
                                        &SERVER_EPH_SEC);
 
-    assert_eq!(server.wait().unwrap_err().kind(), io::ErrorKind::WriteZero);
+    assert_eq!(server.wait().unwrap_err().0.kind(),
+               io::ErrorKind::WriteZero);
 }
 
 #[test]
@@ -396,7 +399,7 @@ fn test_server_read0_msg3() {
                                        &SERVER_EPH_PUB,
                                        &SERVER_EPH_SEC);
 
-    assert_eq!(server.wait().unwrap_err().kind(),
+    assert_eq!(server.wait().unwrap_err().0.kind(),
                io::ErrorKind::UnexpectedEof);
 }
 
@@ -418,7 +421,8 @@ fn test_server_write0_msg4() {
                                        &SERVER_EPH_PUB,
                                        &SERVER_EPH_SEC);
 
-    assert_eq!(server.wait().unwrap_err().kind(), io::ErrorKind::WriteZero);
+    assert_eq!(server.wait().unwrap_err().0.kind(),
+               io::ErrorKind::WriteZero);
 }
 
 fn const_async_true(_: &sign::PublicKey) -> FutureResult<bool, Void> {
@@ -439,7 +443,7 @@ fn test_filter_server_accept() {
                                                  &SERVER_EPH_PUB,
                                                  &SERVER_EPH_SEC);
 
-    let outcome = server.wait().unwrap().unwrap();
+    let outcome = server.wait().unwrap().0.unwrap();
     assert_eq!(outcome.encryption_key(), EXP_SERVER_ENC_KEY);
     assert_eq!(outcome.encryption_nonce(), EXP_SERVER_ENC_NONCE);
     assert_eq!(outcome.decryption_key(), EXP_SERVER_DEC_KEY);
@@ -465,7 +469,7 @@ fn test_filter_server_reject() {
                                                  &SERVER_EPH_PUB,
                                                  &SERVER_EPH_SEC);
 
-    assert!(server.wait().unwrap().unwrap_err() ==
+    assert!(server.wait().unwrap().0.unwrap_err() ==
             ServerHandshakeFailureWithFilter::UnauthorizedClient);
 }
 
@@ -487,7 +491,7 @@ fn test_filter_server_io_error() {
                                                  &SERVER_EPH_PUB,
                                                  &SERVER_EPH_SEC);
 
-    match server.wait().unwrap_err() {
+    match server.wait().unwrap_err().0 {
         ServerHandshakeError::IoError(e) => assert_eq!(e.kind(), io::ErrorKind::NotFound),
         ServerHandshakeError::FilterFnError(_) => assert!(false),
     }
@@ -511,7 +515,7 @@ fn test_filter_server_filter_error() {
                                                  &SERVER_EPH_PUB,
                                                  &SERVER_EPH_SEC);
 
-    match server.wait().unwrap_err() {
+    match server.wait().unwrap_err().0 {
         ServerHandshakeError::IoError(_) => assert!(false),
         ServerHandshakeError::FilterFnError(e) => assert_eq!(e, ()),
     }

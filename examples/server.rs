@@ -49,7 +49,7 @@ fn main() {
     let mut stream = AllowStdIo::new(Duplex::new(std::io::stdin(), std::io::stdout()));
 
     // Set up the handshaker.
-    let handshaker = ServerHandshaker::new(&mut stream,
+    let handshaker = ServerHandshaker::new(stream,
                                            &network_identifier,
                                            &server_longterm_pk,
                                            &server_longterm_sk,
@@ -57,7 +57,7 @@ fn main() {
                                            &SERVER_EPHEMERAL_SK);
 
     match handshaker.wait() {
-        Ok(Ok(outcome)) => {
+        Ok((Ok(outcome), _)) => {
             let mut stdout = std::io::stdout();
 
             let secretbox::Key(encryption_key_bytes) = outcome.encryption_key();
@@ -70,10 +70,10 @@ fn main() {
             let _ = stdout.write_all(&decryption_key_bytes).unwrap();
             let _ = stdout.write_all(&decryption_nonce_bytes).unwrap();
         }
-        Ok(Err(ServerHandshakeFailure::InvalidMsg1)) => {
+        Ok((Err(ServerHandshakeFailure::InvalidMsg1), _)) => {
             std::process::exit(1);
         }
-        Ok(Err(ServerHandshakeFailure::InvalidMsg3)) => {
+        Ok((Err(ServerHandshakeFailure::InvalidMsg3), _)) => {
             std::process::exit(3);
         }
         Err(_) => panic!("stdin/stdout failed"),

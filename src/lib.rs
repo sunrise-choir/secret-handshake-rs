@@ -27,11 +27,12 @@ pub use crypto::{Outcome, NETWORK_IDENTIFIER_BYTES};
 #[cfg(test)]
 extern crate partial_io;
 #[cfg(test)]
-mod test;
-#[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
 #[cfg(test)]
 extern crate async_ringbuffer;
 #[cfg(test)]
 extern crate rand;
+
+#[cfg(test)]
+mod test;
