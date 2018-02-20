@@ -1,6 +1,6 @@
 [package]
 name = "secret_handshake"
-version = "3.0.0"
+version = "3.0.1"
 authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
 description = "Implementation of the secret-handshake protocol."
 repository = "https://github.com/AljoschaMeyer/secret-handshake-rs"
@@ -8,7 +8,7 @@ readme = "README.md"
 license = "GPL-3.0"
 
 [dependencies]
-sodiumoxide = "0.0.15"
+sodiumoxide = "0.0.16"
 libc = "0.2"
 futures = "0.1.17"
 tokio-io = "0.1.4"
