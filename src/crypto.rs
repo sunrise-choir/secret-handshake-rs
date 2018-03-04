@@ -2,7 +2,6 @@
 //! module directly.
 
 use std::mem::uninitialized;
-use std::marker::PhantomData;
 
 use sodiumoxide::crypto::{box_, sign, scalarmult, secretbox, auth};
 use sodiumoxide::crypto::hash::sha256;
@@ -156,7 +155,7 @@ impl Drop for Client {
 /// The struct used in the C code to perform the server side of a handshake.
 #[repr(C)]
 // #[derive(Debug)]
-pub struct Server<'a> {
+pub struct Server {
     app: *const [u8; auth::KEYBYTES],
     pub_: *const [u8; sign::PUBLICKEYBYTES],
     sec: *const [u8; sign::SECRETKEYBYTES],
@@ -168,17 +167,16 @@ pub struct Server<'a> {
     client_eph_pub: [u8; box_::PUBLICKEYBYTES],
     client_pub: [u8; sign::PUBLICKEYBYTES],
     box_sec: [u8; sha256::DIGESTBYTES],
-    _lifetime: PhantomData<&'a [u8; 0]>,
 }
 
-impl<'a> Server<'a> {
+impl Server {
     /// Creates and initializes a new `Server`.
     pub fn new(app: *const [u8; auth::KEYBYTES],
                pub_: *const [u8; sign::PUBLICKEYBYTES],
                sec: *const [u8; sign::SECRETKEYBYTES],
                eph_pub: *const [u8; box_::PUBLICKEYBYTES],
                eph_sec: *const [u8; box_::SECRETKEYBYTES])
-               -> Server<'a> {
+               -> Server {
         Server {
             app,
             pub_,
@@ -190,7 +188,6 @@ impl<'a> Server<'a> {
             client_eph_pub: unsafe { uninitialized() },
             client_pub: unsafe { uninitialized() },
             box_sec: unsafe { uninitialized() },
-            _lifetime: PhantomData,
         }
     }
 
@@ -232,7 +229,7 @@ impl<'a> Server<'a> {
 }
 
 /// Zero out all sensitive data when going out of scope.
-impl<'a> Drop for Server<'a> {
+impl Drop for Server {
     fn drop(&mut self) {
         self.clean();
     }

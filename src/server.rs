@@ -3,6 +3,7 @@
 use std::{error, io, fmt};
 use std::error::Error;
 use std::io::ErrorKind::{WriteZero, UnexpectedEof, Interrupted, WouldBlock};
+use std::marker::PhantomData;
 use std::mem::uninitialized;
 
 use sodiumoxide::crypto::{box_, sign};
@@ -13,8 +14,6 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use void::Void;
 
 use crypto::*;
-
-// TODO cleanup (warnings)
 
 /// Performs the server side of a handshake.
 pub struct ServerHandshaker<'a, S>(ServerHandshakerWithFilter<'a,
@@ -76,6 +75,67 @@ impl<'a, S: AsyncRead + AsyncWrite> Future for ServerHandshaker<'a, S> {
     }
 }
 
+/// Performs the server side of a handshake. This copies the keys so that it isn't constrainted by
+/// their lifetime.
+pub struct OwningServerHandshaker<S>(OwningServerHandshakerWithFilter<S,
+                                                                       fn(&sign::PublicKey)
+                                                                          -> FutureResult<bool,
+                                                                                           Void>,
+                                                                       FutureResult<bool, Void>>);
+
+impl<S: AsyncRead + AsyncWrite> OwningServerHandshaker<S> {
+    /// Creates a new ServerHandshakerWithFilter to accept a connection from a
+    /// client which knows the server's public key and uses the right app key
+    /// over the given `stream`.
+    pub fn new(stream: S,
+               network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
+               server_longterm_pk: &sign::PublicKey,
+               server_longterm_sk: &sign::SecretKey,
+               server_ephemeral_pk: &box_::PublicKey,
+               server_ephemeral_sk: &box_::SecretKey)
+               -> OwningServerHandshaker<S> {
+        OwningServerHandshaker(OwningServerHandshakerWithFilter::new(stream,
+                                                                     const_async_true,
+                                                                     network_identifier,
+                                                                     &server_longterm_pk,
+                                                                     &server_longterm_sk,
+                                                                     &server_ephemeral_pk,
+                                                                     &server_ephemeral_sk))
+    }
+}
+
+/// Future implementation to asynchronously drive a handshake.
+impl<S: AsyncRead + AsyncWrite> Future for OwningServerHandshaker<S> {
+    type Item = (Result<Outcome, ServerHandshakeFailure>, S);
+    type Error = (io::Error, S);
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match self.0.poll() {
+            Ok(Async::Ready((Ok(outcome), stream))) => Ok(Async::Ready((Ok(outcome), stream))),
+            Ok(Async::Ready((Err(failure), stream))) => {
+                match failure {
+                    ServerHandshakeFailureWithFilter::InvalidMsg1 => {
+                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg1), stream)))
+                    }
+                    ServerHandshakeFailureWithFilter::InvalidMsg3 => {
+                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg3), stream)))
+                    }
+                    ServerHandshakeFailureWithFilter::UnauthorizedClient => unreachable!(),
+                }
+            }
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err((e, stream)) => {
+                let new_err = match e {
+                    ServerHandshakeError::FilterFnError(_) => unreachable!(),
+                    ServerHandshakeError::IoError(io_err) => io_err,
+                };
+
+                Err((new_err, stream))
+            }
+        }
+    }
+}
+
 fn const_async_true(_: &sign::PublicKey) -> FutureResult<bool, Void> {
     ok(true)
 }
@@ -92,21 +152,7 @@ pub enum ServerHandshakeFailure {
 
 /// Performs the server side of a handshake. Allows filtering clients based on
 /// their longterm public key.
-pub struct ServerHandshakerWithFilter<'a, S, FilterFn, AsyncBool> {
-    stream: Option<S>,
-    filter: Option<FilterStuff<FilterFn, AsyncBool>>,
-    server: Server<'a>,
-    state: State,
-    data: [u8; MSG3_BYTES], // used to hold and cache the results of `server.create_server_challenge` and `server.create_server_ack`, and any data read from the client
-    offset: usize, // offset into the data array at which to read/write
-}
-
-/// Zero buffered handshake data on dropping.
-impl<'a, S, FilterFn, AsyncBool> Drop for ServerHandshakerWithFilter<'a, S, FilterFn, AsyncBool> {
-    fn drop(&mut self) {
-        memzero(&mut self.data);
-    }
-}
+pub struct ServerHandshakerWithFilter<'a, S, FilterFn, AsyncBool>(UnsafeServerHandshakerWithFilter<S, FilterFn, AsyncBool>, PhantomData<&'a u8>);
 
 impl<'a, S, FilterFn, AsyncBool> ServerHandshakerWithFilter<'a, S, FilterFn, AsyncBool>
     where S: AsyncRead + AsyncWrite,
@@ -128,23 +174,157 @@ impl<'a, S, FilterFn, AsyncBool> ServerHandshakerWithFilter<'a, S, FilterFn, Asy
                server_ephemeral_pk: &'a box_::PublicKey,
                server_ephemeral_sk: &'a box_::SecretKey)
                -> ServerHandshakerWithFilter<'a, S, FilterFn, AsyncBool> {
-        ServerHandshakerWithFilter {
-            stream: Some(stream),
-            filter: Some(FilterFun(filter_fn)),
-            server: Server::new(network_identifier,
-                                &server_longterm_pk.0,
-                                &server_longterm_sk.0,
-                                &server_ephemeral_pk.0,
-                                &server_ephemeral_sk.0),
-            state: ReadMsg1,
-            data: [0; MSG3_BYTES],
-            offset: 0,
-        }
+        ServerHandshakerWithFilter(UnsafeServerHandshakerWithFilter::new(stream,
+                                                                         filter_fn,
+                                                                         network_identifier,
+                                                                         server_longterm_pk,
+                                                                         server_longterm_sk,
+                                                                         server_ephemeral_pk,
+                                                                         server_ephemeral_sk),
+                                   PhantomData)
     }
 }
 
 /// Future implementation to asynchronously drive a handshake.
 impl<'a, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'a, S, FilterFn, AsyncBool>
+    where S: AsyncRead + AsyncWrite,
+          FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
+          AsyncBool: Future<Item = bool>
+{
+    type Item = (Result<Outcome, ServerHandshakeFailureWithFilter>, S);
+    type Error = (ServerHandshakeError<AsyncBool::Error>, S);
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.0.poll()
+    }
+}
+
+/// Performs the server side of a handshake. Allows filtering clients based on
+/// their longterm public key. This copies the keys so that it isn't constrainted by
+/// their lifetime.
+pub struct OwningServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+    network_identifier: Box<[u8; NETWORK_IDENTIFIER_BYTES]>,
+    server_longterm_pk: Box<sign::PublicKey>,
+    server_longterm_sk: Box<sign::SecretKey>,
+    server_ephemeral_pk: Box<box_::PublicKey>,
+    server_ephemeral_sk: Box<box_::SecretKey>,
+    inner: UnsafeServerHandshakerWithFilter<S, FilterFn, AsyncBool>,
+}
+
+impl<S, FilterFn, AsyncBool> OwningServerHandshakerWithFilter<S, FilterFn, AsyncBool>
+    where S: AsyncRead + AsyncWrite,
+          FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
+          AsyncBool: Future<Item = bool>
+{
+    /// Creates a new OwningServerHandshakerWithFilter to accept a connection from a
+    /// client which knows the server's public key and uses the right app key
+    /// over the given `stream`.
+    ///
+    /// Once the client has revealed its longterm public key, `filter_fn` is
+    /// invoked. If the returned `AsyncBool` resolves to `Ok(Async::Ready(false))`,
+    /// the handshake is aborted.
+    pub fn new(stream: S,
+               filter_fn: FilterFn,
+               network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
+               server_longterm_pk: &sign::PublicKey,
+               server_longterm_sk: &sign::SecretKey,
+               server_ephemeral_pk: &box_::PublicKey,
+               server_ephemeral_sk: &box_::SecretKey)
+               -> OwningServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+        let network_identifier = Box::new(network_identifier.clone());
+        let server_longterm_pk = Box::new(server_longterm_pk.clone());
+        let server_longterm_sk = Box::new(server_longterm_sk.clone());
+        let server_ephemeral_pk = Box::new(server_ephemeral_pk.clone());
+        let server_ephemeral_sk = Box::new(server_ephemeral_sk.clone());
+
+        OwningServerHandshakerWithFilter {
+            inner: UnsafeServerHandshakerWithFilter::new(stream,
+                                                         filter_fn,
+                                                         network_identifier.as_ref(),
+                                                         server_longterm_pk.as_ref(),
+                                                         server_longterm_sk.as_ref(),
+                                                         server_ephemeral_pk.as_ref(),
+                                                         server_ephemeral_sk.as_ref()),
+            network_identifier,
+            server_longterm_pk,
+            server_longterm_sk,
+            server_ephemeral_pk,
+            server_ephemeral_sk,
+        }
+    }
+}
+
+/// Future implementation to asynchronously drive a handshake.
+impl<S, FilterFn, AsyncBool> Future for OwningServerHandshakerWithFilter<S, FilterFn, AsyncBool>
+    where S: AsyncRead + AsyncWrite,
+          FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
+          AsyncBool: Future<Item = bool>
+{
+    type Item = (Result<Outcome, ServerHandshakeFailureWithFilter>, S);
+    type Error = (ServerHandshakeError<AsyncBool::Error>, S);
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.inner.poll()
+    }
+}
+
+// Performs the server side of a handshake. Allows filtering clients based on
+// their longterm public key.
+struct UnsafeServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+    stream: Option<S>,
+    filter: Option<FilterStuff<FilterFn, AsyncBool>>,
+    server: Server,
+    state: State,
+    data: [u8; MSG3_BYTES], // used to hold and cache the results of `server.create_server_challenge` and `server.create_server_ack`, and any data read from the client
+    offset: usize, // offset into the data array at which to read/write
+}
+
+// Zero buffered handshake data on dropping.
+impl<S, FilterFn, AsyncBool> Drop for UnsafeServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+    fn drop(&mut self) {
+        memzero(&mut self.data);
+    }
+}
+
+impl<S, FilterFn, AsyncBool> UnsafeServerHandshakerWithFilter<S, FilterFn, AsyncBool>
+    where S: AsyncRead + AsyncWrite,
+          FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
+          AsyncBool: Future<Item = bool>
+{
+    /// Creates a new ServerHandshakerWithFilter to accept a connection from a
+    /// client which knows the server's public key and uses the right app key
+    /// over the given `stream`.
+    ///
+    /// Once the client has revealed its longterm public key, `filter_fn` is
+    /// invoked. If the returned `AsyncBool` resolves to `Ok(Async::Ready(false))`,
+    /// the handshake is aborted.
+    pub fn new(stream: S,
+               filter_fn: FilterFn,
+               network_identifier: *const [u8; NETWORK_IDENTIFIER_BYTES],
+               server_longterm_pk: *const sign::PublicKey,
+               server_longterm_sk: *const sign::SecretKey,
+               server_ephemeral_pk: *const box_::PublicKey,
+               server_ephemeral_sk: *const box_::SecretKey)
+               -> UnsafeServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
+        unsafe {
+            UnsafeServerHandshakerWithFilter {
+                stream: Some(stream),
+                filter: Some(FilterFun(filter_fn)),
+                server: Server::new(network_identifier,
+                                    &(*server_longterm_pk).0,
+                                    &(*server_longterm_sk).0,
+                                    &(*server_ephemeral_pk).0,
+                                    &(*server_ephemeral_sk).0),
+                state: ReadMsg1,
+                data: [0; MSG3_BYTES],
+                offset: 0,
+            }
+        }
+    }
+}
+
+/// Future implementation to asynchronously drive a handshake.
+impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, FilterFn, AsyncBool>
     where S: AsyncRead + AsyncWrite,
           FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
           AsyncBool: Future<Item = bool>

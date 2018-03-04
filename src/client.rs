@@ -49,7 +49,6 @@ impl<'a, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'a, S> {
 
 /// Performs the client side of a handshake. This copies the keys so that it isn't constrainted by
 /// their lifetime.
-// pub struct OwningClientHandshaker<S>(UnsafeClientHandshaker<S>);
 pub struct OwningClientHandshaker<S> {
     network_identifier: Box<[u8; NETWORK_IDENTIFIER_BYTES]>,
     client_longterm_pk: Box<sign::PublicKey>,
@@ -77,6 +76,7 @@ impl<S: AsyncRead + AsyncWrite> OwningClientHandshaker<S> {
         let client_ephemeral_pk = Box::new(client_ephemeral_pk.clone());
         let client_ephemeral_sk = Box::new(client_ephemeral_sk.clone());
         let server_longterm_pk = Box::new(server_longterm_pk.clone());
+
         OwningClientHandshaker {
             inner: UnsafeClientHandshaker::new(stream,
                                                network_identifier.as_ref(),
