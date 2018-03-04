@@ -75,7 +75,7 @@ impl Outcome {
 /// The struct used in the C code to perform the client side of a handshake.
 #[repr(C)]
 // #[derive(Debug)]
-pub struct Client<'a> {
+pub struct Client {
     // inputs
     app: *const [u8; auth::KEYBYTES],
     pub_: *const [u8; sign::PUBLICKEYBYTES],
@@ -89,10 +89,9 @@ pub struct Client<'a> {
     hello: [u8; sign::SIGNATUREBYTES + sign::PUBLICKEYBYTES],
     shared_hash: [u8; sha256::DIGESTBYTES],
     server_eph_pub: [u8; box_::PUBLICKEYBYTES],
-    _lifetime: PhantomData<&'a [u8; 0]>,
 }
 
-impl<'a> Client<'a> {
+impl Client {
     /// Creates and initializes a new `Client`.
     pub fn new(app: *const [u8; auth::KEYBYTES],
                pub_: *const [u8; sign::PUBLICKEYBYTES],
@@ -100,7 +99,7 @@ impl<'a> Client<'a> {
                eph_pub: *const [u8; box_::PUBLICKEYBYTES],
                eph_sec: *const [u8; box_::SECRETKEYBYTES],
                server_pub: *const [u8; sign::PUBLICKEYBYTES])
-               -> Client<'a> {
+               -> Client {
         Client {
             app,
             pub_,
@@ -113,7 +112,6 @@ impl<'a> Client<'a> {
             hello: unsafe { uninitialized() },
             shared_hash: unsafe { uninitialized() },
             server_eph_pub: unsafe { uninitialized() },
-            _lifetime: PhantomData,
         }
     }
 
@@ -149,7 +147,7 @@ impl<'a> Client<'a> {
 }
 
 /// Zero out all sensitive data when going out of scope.
-impl<'a> Drop for Client<'a> {
+impl Drop for Client {
     fn drop(&mut self) {
         self.clean();
     }
@@ -233,6 +231,13 @@ impl<'a> Server<'a> {
     }
 }
 
+/// Zero out all sensitive data when going out of scope.
+impl<'a> Drop for Server<'a> {
+    fn drop(&mut self) {
+        self.clean();
+    }
+}
+
 extern "C" {
     // client side
     fn shs1_create_client_challenge(challenge: *mut [u8; MSG1_BYTES], client: *mut Client);
@@ -252,11 +257,4 @@ extern "C" {
     fn shs1_create_server_ack(ack: *mut [u8; MSG4_BYTES], server: *mut Server);
     fn shs1_server_outcome(outcome: *mut Outcome, server: *mut Server);
     fn shs1_server_clean(server: *mut Server);
-}
-
-/// Zero out all sensitive data when going out of scope.
-impl<'a> Drop for Server<'a> {
-    fn drop(&mut self) {
-        self.clean();
-    }
 }

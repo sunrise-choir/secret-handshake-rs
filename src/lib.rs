@@ -6,6 +6,7 @@
 //! before performing any handshakes.
 
 #![deny(missing_docs)]
+#![feature(unique)]
 extern crate sodiumoxide;
 extern crate libc;
 extern crate futures;
