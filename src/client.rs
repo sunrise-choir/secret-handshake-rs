@@ -63,12 +63,12 @@ impl<S: AsyncRead + AsyncWrite> OwningClientHandshaker<S> {
     /// Creates a new OwningClientHandshaker to connect to a server with known public key
     /// and app key over the given `stream`.
     pub fn new(stream: S,
-               network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
-               client_longterm_pk: &sign::PublicKey,
-               client_longterm_sk: &sign::SecretKey,
-               client_ephemeral_pk: &box_::PublicKey,
-               client_ephemeral_sk: &box_::SecretKey,
-               server_longterm_pk: &sign::PublicKey)
+               network_identifier: [u8; NETWORK_IDENTIFIER_BYTES],
+               client_longterm_pk: sign::PublicKey,
+               client_longterm_sk: sign::SecretKey,
+               client_ephemeral_pk: box_::PublicKey,
+               client_ephemeral_sk: box_::SecretKey,
+               server_longterm_pk: sign::PublicKey)
                -> OwningClientHandshaker<S> {
         let network_identifier = Box::new(network_identifier.clone());
         let client_longterm_pk = Box::new(client_longterm_pk.clone());

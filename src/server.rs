@@ -88,19 +88,19 @@ impl<S: AsyncRead + AsyncWrite> OwningServerHandshaker<S> {
     /// client which knows the server's public key and uses the right app key
     /// over the given `stream`.
     pub fn new(stream: S,
-               network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
-               server_longterm_pk: &sign::PublicKey,
-               server_longterm_sk: &sign::SecretKey,
-               server_ephemeral_pk: &box_::PublicKey,
-               server_ephemeral_sk: &box_::SecretKey)
+               network_identifier: [u8; NETWORK_IDENTIFIER_BYTES],
+               server_longterm_pk: sign::PublicKey,
+               server_longterm_sk: sign::SecretKey,
+               server_ephemeral_pk: box_::PublicKey,
+               server_ephemeral_sk: box_::SecretKey)
                -> OwningServerHandshaker<S> {
         OwningServerHandshaker(OwningServerHandshakerWithFilter::new(stream,
                                                                      const_async_true,
                                                                      network_identifier,
-                                                                     &server_longterm_pk,
-                                                                     &server_longterm_sk,
-                                                                     &server_ephemeral_pk,
-                                                                     &server_ephemeral_sk))
+                                                                     server_longterm_pk,
+                                                                     server_longterm_sk,
+                                                                     server_ephemeral_pk,
+                                                                     server_ephemeral_sk))
     }
 }
 
@@ -225,11 +225,11 @@ impl<S, FilterFn, AsyncBool> OwningServerHandshakerWithFilter<S, FilterFn, Async
     /// the handshake is aborted.
     pub fn new(stream: S,
                filter_fn: FilterFn,
-               network_identifier: &[u8; NETWORK_IDENTIFIER_BYTES],
-               server_longterm_pk: &sign::PublicKey,
-               server_longterm_sk: &sign::SecretKey,
-               server_ephemeral_pk: &box_::PublicKey,
-               server_ephemeral_sk: &box_::SecretKey)
+               network_identifier: [u8; NETWORK_IDENTIFIER_BYTES],
+               server_longterm_pk: sign::PublicKey,
+               server_longterm_sk: sign::SecretKey,
+               server_ephemeral_pk: box_::PublicKey,
+               server_ephemeral_sk: box_::SecretKey)
                -> OwningServerHandshakerWithFilter<S, FilterFn, AsyncBool> {
         let network_identifier = Box::new(network_identifier.clone());
         let server_longterm_pk = Box::new(server_longterm_pk.clone());
