@@ -6,15 +6,13 @@
 //! before performing any handshakes.
 
 #![deny(missing_docs)]
-#![feature(unique)]
 extern crate sodiumoxide;
 extern crate libc;
-extern crate futures;
-extern crate tokio_io;
-extern crate void;
-extern crate atm_io_utils;
+extern crate futures_core;
+extern crate futures_io;
 
 pub mod crypto;
+pub mod errors;
 mod client;
 mod server;
 
@@ -23,14 +21,11 @@ pub use server::*;
 pub use crypto::{Outcome, NETWORK_IDENTIFIER_BYTES};
 
 #[cfg(test)]
-extern crate partial_io;
-#[cfg(test)]
-#[macro_use]
-extern crate quickcheck;
-#[cfg(test)]
 extern crate async_ringbuffer;
 #[cfg(test)]
-extern crate rand;
+extern crate atm_io_utils;
+#[cfg(test)]
+extern crate futures;
 
 #[cfg(test)]
 mod test;

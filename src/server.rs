@@ -2,25 +2,27 @@
 
 use std::{error, io, fmt};
 use std::error::Error;
-use std::io::ErrorKind::{WriteZero, UnexpectedEof, Interrupted, WouldBlock};
+use std::io::ErrorKind::{WriteZero, UnexpectedEof};
 use std::marker::PhantomData;
 use std::mem::uninitialized;
 
 use sodiumoxide::crypto::{box_, sign};
 use sodiumoxide::utils::memzero;
-use futures::{Poll, Async, Future};
-use futures::future::{ok, FutureResult};
-use tokio_io::{AsyncRead, AsyncWrite};
-use void::Void;
+use futures_core::{Poll, Future, Never};
+use futures_core::Async::{Ready, Pending};
+use futures_core::task::Context;
+use futures_core::future::{FutureResult, ok};
+use futures_io::{AsyncRead, AsyncWrite};
 
 use crypto::*;
+use errors::*;
 
 /// Performs the server side of a handshake.
 pub struct ServerHandshaker<'a, S>(ServerHandshakerWithFilter<'a,
                                                                S,
                                                                fn(&sign::PublicKey)
-                                                                  -> FutureResult<bool, Void>,
-                                                               FutureResult<bool, Void>>);
+                                                                  -> FutureResult<bool, Never>,
+                                                               FutureResult<bool, Never>>);
 
 impl<'a, S: AsyncRead + AsyncWrite> ServerHandshaker<'a, S> {
     /// Creates a new ServerHandshakerWithFilter to accept a connection from a
@@ -45,28 +47,18 @@ impl<'a, S: AsyncRead + AsyncWrite> ServerHandshaker<'a, S> {
 
 /// Future implementation to asynchronously drive a handshake.
 impl<'a, S: AsyncRead + AsyncWrite> Future for ServerHandshaker<'a, S> {
-    type Item = (Result<Outcome, ServerHandshakeFailure>, S);
-    type Error = (io::Error, S);
+    type Item = (Outcome, S);
+    type Error = (HandshakeError, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.0.poll() {
-            Ok(Async::Ready((Ok(outcome), stream))) => Ok(Async::Ready((Ok(outcome), stream))),
-            Ok(Async::Ready((Err(failure), stream))) => {
-                match failure {
-                    ServerHandshakeFailureWithFilter::InvalidMsg1 => {
-                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg1), stream)))
-                    }
-                    ServerHandshakeFailureWithFilter::InvalidMsg3 => {
-                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg3), stream)))
-                    }
-                    ServerHandshakeFailureWithFilter::UnauthorizedClient => unreachable!(),
-                }
-            }
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err((e, stream)) => {
-                let new_err = match e {
-                    ServerHandshakeError::FilterFnError(_) => unreachable!(),
-                    ServerHandshakeError::IoError(io_err) => io_err,
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
+        match self.0.poll(cx) {
+            Ok(foo) => Ok(foo),
+            Err((err, stream)) => {
+                let new_err = match err {
+                    FilteringHandshakeError::IoError(io_err) => io_err.into(),
+                    FilteringHandshakeError::FilterError(_) => unreachable!(),
+                    FilteringHandshakeError::CryptoError => HandshakeError::CryptoError,
+                    FilteringHandshakeError::Rejected => unreachable!(),
                 };
 
                 Err((new_err, stream))
@@ -80,8 +72,8 @@ impl<'a, S: AsyncRead + AsyncWrite> Future for ServerHandshaker<'a, S> {
 pub struct OwningServerHandshaker<S>(OwningServerHandshakerWithFilter<S,
                                                                        fn(&sign::PublicKey)
                                                                           -> FutureResult<bool,
-                                                                                           Void>,
-                                                                       FutureResult<bool, Void>>);
+                                                                                           Never>,
+                                                                       FutureResult<bool, Never>>);
 
 impl<S: AsyncRead + AsyncWrite> OwningServerHandshaker<S> {
     /// Creates a new ServerHandshakerWithFilter to accept a connection from a
@@ -106,28 +98,18 @@ impl<S: AsyncRead + AsyncWrite> OwningServerHandshaker<S> {
 
 /// Future implementation to asynchronously drive a handshake.
 impl<S: AsyncRead + AsyncWrite> Future for OwningServerHandshaker<S> {
-    type Item = (Result<Outcome, ServerHandshakeFailure>, S);
-    type Error = (io::Error, S);
+    type Item = (Outcome, S);
+    type Error = (HandshakeError, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.0.poll() {
-            Ok(Async::Ready((Ok(outcome), stream))) => Ok(Async::Ready((Ok(outcome), stream))),
-            Ok(Async::Ready((Err(failure), stream))) => {
-                match failure {
-                    ServerHandshakeFailureWithFilter::InvalidMsg1 => {
-                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg1), stream)))
-                    }
-                    ServerHandshakeFailureWithFilter::InvalidMsg3 => {
-                        Ok(Async::Ready((Err(ServerHandshakeFailure::InvalidMsg3), stream)))
-                    }
-                    ServerHandshakeFailureWithFilter::UnauthorizedClient => unreachable!(),
-                }
-            }
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err((e, stream)) => {
-                let new_err = match e {
-                    ServerHandshakeError::FilterFnError(_) => unreachable!(),
-                    ServerHandshakeError::IoError(io_err) => io_err,
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
+        match self.0.poll(cx) {
+            Ok(foo) => Ok(foo),
+            Err((err, stream)) => {
+                let new_err = match err {
+                    FilteringHandshakeError::IoError(io_err) => io_err.into(),
+                    FilteringHandshakeError::FilterError(_) => unreachable!(),
+                    FilteringHandshakeError::CryptoError => HandshakeError::CryptoError,
+                    FilteringHandshakeError::Rejected => unreachable!(),
                 };
 
                 Err((new_err, stream))
@@ -136,18 +118,8 @@ impl<S: AsyncRead + AsyncWrite> Future for OwningServerHandshaker<S> {
     }
 }
 
-fn const_async_true(_: &sign::PublicKey) -> FutureResult<bool, Void> {
+fn const_async_true(_: &sign::PublicKey) -> FutureResult<bool, Never> {
     ok(true)
-}
-
-/// Reason why a server might reject the client although the handshake itself
-/// was executed without IO errors.
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum ServerHandshakeFailure {
-    /// Received invalid msg1 from the client.
-    InvalidMsg1,
-    /// Received invalid msg3 from the client.
-    InvalidMsg3,
 }
 
 /// Performs the server side of a handshake. Allows filtering clients based on
@@ -164,7 +136,7 @@ impl<'a, S, FilterFn, AsyncBool> ServerHandshakerWithFilter<'a, S, FilterFn, Asy
     /// over the given `stream`.
     ///
     /// Once the client has revealed its longterm public key, `filter_fn` is
-    /// invoked. If the returned `AsyncBool` resolves to `Ok(Async::Ready(false))`,
+    /// invoked. If the returned `AsyncBool` resolves to `Ok(Ready(false))`,
     /// the handshake is aborted.
     pub fn new(stream: S,
                filter_fn: FilterFn,
@@ -191,11 +163,11 @@ impl<'a, S, FilterFn, AsyncBool> Future for ServerHandshakerWithFilter<'a, S, Fi
           FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
           AsyncBool: Future<Item = bool>
 {
-    type Item = (Result<Outcome, ServerHandshakeFailureWithFilter>, S);
-    type Error = (ServerHandshakeError<AsyncBool::Error>, S);
+    type Item = (Outcome, S);
+    type Error = (FilteringHandshakeError<AsyncBool::Error>, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
+        self.0.poll(cx)
     }
 }
 
@@ -221,7 +193,7 @@ impl<S, FilterFn, AsyncBool> OwningServerHandshakerWithFilter<S, FilterFn, Async
     /// over the given `stream`.
     ///
     /// Once the client has revealed its longterm public key, `filter_fn` is
-    /// invoked. If the returned `AsyncBool` resolves to `Ok(Async::Ready(false))`,
+    /// invoked. If the returned `AsyncBool` resolves to `Ok(Ready(false))`,
     /// the handshake is aborted.
     pub fn new(stream: S,
                filter_fn: FilterFn,
@@ -260,11 +232,11 @@ impl<S, FilterFn, AsyncBool> Future for OwningServerHandshakerWithFilter<S, Filt
           FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
           AsyncBool: Future<Item = bool>
 {
-    type Item = (Result<Outcome, ServerHandshakeFailureWithFilter>, S);
-    type Error = (ServerHandshakeError<AsyncBool::Error>, S);
+    type Item = (Outcome, S);
+    type Error = (FilteringHandshakeError<AsyncBool::Error>, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.inner.poll()
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
+        self.inner.poll(cx)
     }
 }
 
@@ -296,7 +268,7 @@ impl<S, FilterFn, AsyncBool> UnsafeServerHandshakerWithFilter<S, FilterFn, Async
     /// over the given `stream`.
     ///
     /// Once the client has revealed its longterm public key, `filter_fn` is
-    /// invoked. If the returned `AsyncBool` resolves to `Ok(Async::Ready(false))`,
+    /// invoked. If the returned `AsyncBool` resolves to `Ok(Ready(false))`,
     /// the handshake is aborted.
     pub fn new(stream: S,
                filter_fn: FilterFn,
@@ -329,10 +301,10 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
           FilterFn: FnOnce(&sign::PublicKey) -> AsyncBool,
           AsyncBool: Future<Item = bool>
 {
-    type Item = (Result<Outcome, ServerHandshakeFailureWithFilter>, S);
-    type Error = (ServerHandshakeError<AsyncBool::Error>, S);
+    type Item = (Outcome, S);
+    type Error = (FilteringHandshakeError<AsyncBool::Error>, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
         let mut stream = self.stream
             .take()
             .expect("Polled ServerHandshaker after completion");
@@ -340,8 +312,8 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
         match self.state {
             ReadMsg1 => {
                 while self.offset < MSG1_BYTES {
-                    match stream.read(&mut self.data[self.offset..MSG1_BYTES]) {
-                        Ok(read) => {
+                    match stream.poll_read(cx, &mut self.data[self.offset..MSG1_BYTES]) {
+                        Ok(Ready(read)) => {
                             if read == 0 {
                                 return Err((io::Error::new(UnexpectedEof, "failed to read msg1")
                                                 .into(),
@@ -349,11 +321,10 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                             }
                             self.offset += read;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
                         Err(e) => return Err((e.into(), stream)),
                     }
                 }
@@ -363,8 +334,7 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                                          &*(&self.data as *const [u8; MSG3_BYTES] as
                                             *const [u8; MSG1_BYTES])
                                      }) {
-                    return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::InvalidMsg1),
-                                            stream)));
+                    return Err((FilteringHandshakeError::CryptoError, stream));
                 }
 
                 self.stream = Some(stream);
@@ -375,13 +345,13 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                                      &mut *(&mut self.data as *mut [u8; MSG3_BYTES] as
                                             *mut [u8; MSG2_BYTES])
                                  });
-                return self.poll();
+                return self.poll(cx);
             }
 
             WriteMsg2 => {
                 while self.offset < MSG2_BYTES {
-                    match stream.write(&self.data[self.offset..MSG2_BYTES]) {
-                        Ok(written) => {
+                    match stream.poll_write(cx, &self.data[self.offset..MSG2_BYTES]) {
+                        Ok(Ready(written)) => {
                             if written == 0 {
                                 return Err((io::Error::new(WriteZero, "failed to write msg2")
                                                 .into(),
@@ -389,11 +359,10 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                             }
                             self.offset += written;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
                         Err(e) => return Err((e.into(), stream)),
                     }
                 }
@@ -401,29 +370,28 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                 self.stream = Some(stream);
                 self.offset = 0;
                 self.state = FlushMsg2;
-                return self.poll();
+                return self.poll(cx);
             }
 
             FlushMsg2 => {
-                match stream.flush() {
-                    Ok(_) => {}
-                    Err(ref e) if e.kind() == WouldBlock => {
+                match stream.poll_flush(cx) {
+                    Ok(Ready(())) => {}
+                    Ok(Pending) => {
                         self.stream = Some(stream);
-                        return Ok(Async::NotReady);
+                        return Ok(Pending);
                     }
-                    Err(ref e) if e.kind() == Interrupted => {}
                     Err(e) => return Err((e.into(), stream)),
                 }
 
                 self.stream = Some(stream);
                 self.state = ReadMsg3;
-                return self.poll();
+                return self.poll(cx);
             }
 
             ReadMsg3 => {
                 while self.offset < MSG3_BYTES {
-                    match stream.read(&mut self.data[self.offset..MSG3_BYTES]) {
-                        Ok(read) => {
+                    match stream.poll_read(cx, &mut self.data[self.offset..MSG3_BYTES]) {
+                        Ok(Ready(read)) => {
                             if read == 0 {
                                 return Err((io::Error::new(UnexpectedEof, "failed to read msg3")
                                                 .into(),
@@ -431,18 +399,16 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                             }
                             self.offset += read;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
                         Err(e) => return Err((e.into(), stream)),
                     }
                 }
 
                 if !self.server.verify_msg3(&self.data) {
-                    return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::InvalidMsg3),
-                                            stream)));
+                    return Err((FilteringHandshakeError::CryptoError, stream));
                 }
 
                 let filter_fn =
@@ -461,7 +427,7 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                 self.stream = Some(stream);
                 self.offset = 0;
                 self.state = FilterClient;
-                return self.poll();
+                return self.poll(cx);
             }
 
             FilterClient => {
@@ -473,16 +439,16 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                         FilterFuture(f) => f,
                     };
 
-                match filter_future.poll() {
-                    Err(e) => return Err((ServerHandshakeError::FilterFnError(e), stream)),
-                    Ok(Async::NotReady) => {
+                match filter_future.poll(cx) {
+                    Err(err) => return Err((FilteringHandshakeError::FilterError(err), stream)),
+                    Ok(Pending) => {
                         self.filter = Some(FilterFuture(filter_future));
                         self.stream = Some(stream);
-                        return Ok(Async::NotReady);
+                        return Ok(Pending);
                     }
-                    Ok(Async::Ready(is_authorized)) => {
+                    Ok(Ready(is_authorized)) => {
                         if !is_authorized {
-                            return Ok(Async::Ready((Err(ServerHandshakeFailureWithFilter::UnauthorizedClient), stream)));
+                            return Err((FilteringHandshakeError::Rejected, stream));
                         }
 
                         self.stream = Some(stream);
@@ -493,15 +459,15 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                                                     *mut [u8; MSG4_BYTES])
                                          });
 
-                        return self.poll();
+                        return self.poll(cx);
                     }
                 }
             }
 
             WriteMsg4 => {
                 while self.offset < MSG4_BYTES {
-                    match stream.write(&self.data[self.offset..MSG4_BYTES]) {
-                        Ok(written) => {
+                    match stream.poll_write(cx, &self.data[self.offset..MSG4_BYTES]) {
+                        Ok(Ready(written)) => {
                             if written == 0 {
                                 return Err((io::Error::new(WriteZero, "failed to write msg4")
                                                 .into(),
@@ -509,11 +475,10 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                             }
                             self.offset += written;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
                         Err(e) => return Err((e.into(), stream)),
                     }
                 }
@@ -521,25 +486,23 @@ impl<S, FilterFn, AsyncBool> Future for UnsafeServerHandshakerWithFilter<S, Filt
                 self.stream = Some(stream);
                 self.offset = 0;
                 self.state = FlushMsg4;
-                return self.poll();
+                return self.poll(cx);
             }
 
             FlushMsg4 => {
-                match stream.flush() {
-                    Ok(_) => {}
-                    Err(ref e) if e.kind() == WouldBlock => {
+                match stream.poll_flush(cx) {
+                    Ok(Ready(())) => {}
+                    Ok(Pending) => {
                         self.stream = Some(stream);
-                        return Ok(Async::NotReady);
+                        return Ok(Pending);
                     }
-                    Err(ref e) if e.kind() == Interrupted => {}
                     Err(e) => return Err((e.into(), stream)),
                 }
 
                 let mut outcome = unsafe { uninitialized() };
                 self.server.outcome(&mut outcome);
-                return Ok(Async::Ready((Ok(outcome), stream)));
+                return Ok(Ready((outcome, stream)));
             }
-
         }
     }
 }

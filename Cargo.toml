@@ -10,16 +10,13 @@ license = "AGPL-3.0"
 [dependencies]
 sodiumoxide = "0.0.16"
 libc = "0.2"
-futures = "0.1.17"
-tokio-io = "0.1.4"
-void = "1.0.2"
-atm-io-utils = "0.1.0"
+futures-core = "0.2.0-alpha"
+futures-io = "0.2.0-alpha"
 
 [dev-dependencies]
-partial-io = { version = "0.2.5", features = ["quickcheck", "tokio"] }
-quickcheck = "0.4.1"
-async-ringbuffer = "0.1.0"
-rand = "0.3.18"
+async-ringbuffer = "0.3.0"
+atm-io-utils = "0.2.0"
+futures = "0.2.0-alpha"
 
 [build-dependencies]
 cc = "1.0.0"

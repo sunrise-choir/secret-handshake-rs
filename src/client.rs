@@ -2,15 +2,17 @@
 
 use std::marker::PhantomData;
 use std::mem::uninitialized;
-use std::io::ErrorKind::{WriteZero, UnexpectedEof, Interrupted, WouldBlock};
-use std::io::Error;
+use std::io::ErrorKind::{WriteZero, UnexpectedEof};
 
 use sodiumoxide::crypto::{box_, sign};
 use sodiumoxide::utils::memzero;
-use futures::{Poll, Async, Future};
-use tokio_io::{AsyncRead, AsyncWrite};
+use futures_core::{Poll, Future};
+use futures_core::Async::{Ready, Pending};
+use futures_core::task::Context;
+use futures_io::{AsyncRead, AsyncWrite, Error};
 
 use crypto::*;
+use errors::HandshakeError;
 
 /// Performs the client side of a handshake.
 pub struct ClientHandshaker<'a, S>(UnsafeClientHandshaker<S>, PhantomData<&'a u8>);
@@ -39,11 +41,11 @@ impl<'a, S: AsyncRead + AsyncWrite> ClientHandshaker<'a, S> {
 
 /// Future implementation to asynchronously drive a handshake.
 impl<'a, S: AsyncRead + AsyncWrite> Future for ClientHandshaker<'a, S> {
-    type Item = (Result<Outcome, ClientHandshakeFailure>, S);
-    type Error = (Error, S);
+    type Item = (Outcome, S);
+    type Error = (HandshakeError, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
+        self.0.poll(cx)
     }
 }
 
@@ -97,11 +99,11 @@ impl<S: AsyncRead + AsyncWrite> OwningClientHandshaker<S> {
 
 /// Future implementation to asynchronously drive a handshake.
 impl<S: AsyncRead + AsyncWrite> Future for OwningClientHandshaker<S> {
-    type Item = (Result<Outcome, ClientHandshakeFailure>, S);
-    type Error = (Error, S);
+    type Item = (Outcome, S);
+    type Error = (HandshakeError, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.inner.poll()
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
+        self.inner.poll(cx)
     }
 }
 
@@ -156,10 +158,10 @@ impl<S> Drop for UnsafeClientHandshaker<S> {
 
 // Future implementation to asynchronously drive a handshake.
 impl<S: AsyncRead + AsyncWrite> Future for UnsafeClientHandshaker<S> {
-    type Item = (Result<Outcome, ClientHandshakeFailure>, S);
-    type Error = (Error, S);
+    type Item = (Outcome, S);
+    type Error = (HandshakeError, S);
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self::Item, Self::Error> {
         let mut stream = self.stream
             .take()
             .expect("Polled UnsafeClientHandshaker after completion");
@@ -167,19 +169,19 @@ impl<S: AsyncRead + AsyncWrite> Future for UnsafeClientHandshaker<S> {
         match self.state {
             WriteMsg1 => {
                 while self.offset < MSG1_BYTES {
-                    match stream.write(&self.data[self.offset..MSG1_BYTES]) {
-                        Ok(written) => {
+                    match stream.poll_write(cx, &self.data[self.offset..MSG1_BYTES]) {
+                        Ok(Ready(written)) => {
                             if written == 0 {
-                                return Err((Error::new(WriteZero, "failed to write msg1"), stream));
+                                return Err((Error::new(WriteZero, "failed to write msg1").into(),
+                                            stream));
                             }
                             self.offset += written;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
-                        Err(e) => return Err((e, stream)),
+                        Err(e) => return Err((e.into(), stream)),
                     }
                 }
 
@@ -187,41 +189,40 @@ impl<S: AsyncRead + AsyncWrite> Future for UnsafeClientHandshaker<S> {
                 self.offset = 0;
                 self.state = FlushMsg1;
 
-                return self.poll();
+                return self.poll(cx);
             }
 
             FlushMsg1 => {
-                match stream.flush() {
-                    Ok(_) => {}
-                    Err(ref e) if e.kind() == WouldBlock => {
+                match stream.poll_flush(cx) {
+                    Ok(Ready(())) => {}
+                    Ok(Pending) => {
                         self.stream = Some(stream);
-                        return Ok(Async::NotReady);
+                        return Ok(Pending);
                     }
-                    Err(ref e) if e.kind() == Interrupted => {}
-                    Err(e) => return Err((e, stream)),
+                    Err(e) => return Err((e.into(), stream)),
                 }
 
                 self.stream = Some(stream);
                 self.state = ReadMsg2;
-                return self.poll();
+                return self.poll(cx);
             }
 
             ReadMsg2 => {
                 while self.offset < MSG2_BYTES {
-                    match stream.read(&mut self.data[self.offset..MSG2_BYTES]) {
-                        Ok(read) => {
+                    match stream.poll_read(cx, &mut self.data[self.offset..MSG2_BYTES]) {
+                        Ok(Ready(read)) => {
                             if read == 0 {
-                                return Err((Error::new(UnexpectedEof, "failed to read msg2"),
+                                return Err((Error::new(UnexpectedEof, "failed to read msg2")
+                                                .into(),
                                             stream));
                             }
                             self.offset += read;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
-                        Err(e) => return Err((e, stream)),
+                        Err(e) => return Err((e.into(), stream)),
                     }
                 }
 
@@ -230,72 +231,71 @@ impl<S: AsyncRead + AsyncWrite> Future for UnsafeClientHandshaker<S> {
                                          &*(&self.data as *const [u8; MSG3_BYTES] as
                                             *const [u8; MSG2_BYTES])
                                      }) {
-                    return Ok(Async::Ready((Err(ClientHandshakeFailure::InvalidMsg2), stream)));
+                    return Err((HandshakeError::CryptoError, stream));
                 }
 
                 self.stream = Some(stream);
                 self.offset = 0;
                 self.state = WriteMsg3;
                 self.client.create_msg3(&mut self.data);
-                return self.poll();
+                return self.poll(cx);
             }
 
             WriteMsg3 => {
                 while self.offset < MSG3_BYTES {
-                    match stream.write(&self.data[self.offset..MSG3_BYTES]) {
-                        Ok(written) => {
+                    match stream.poll_write(cx, &self.data[self.offset..MSG3_BYTES]) {
+                        Ok(Ready(written)) => {
                             if written == 0 {
-                                return Err((Error::new(WriteZero, "failed to write msg3"), stream));
+                                return Err((Error::new(WriteZero, "failed to write msg3").into(),
+                                            stream));
                             }
                             self.offset += written;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
-                        Err(e) => return Err((e, stream)),
+                        Err(e) => return Err((e.into(), stream)),
                     }
                 }
 
                 self.stream = Some(stream);
                 self.offset = 0;
                 self.state = FlushMsg3;
-                return self.poll();
+                return self.poll(cx);
             }
 
             FlushMsg3 => {
-                match stream.flush() {
-                    Ok(_) => {}
-                    Err(ref e) if e.kind() == WouldBlock => {
+                match stream.poll_flush(cx) {
+                    Ok(Ready(())) => {}
+                    Ok(Pending) => {
                         self.stream = Some(stream);
-                        return Ok(Async::NotReady);
+                        return Ok(Pending);
                     }
-                    Err(ref e) if e.kind() == Interrupted => {}
-                    Err(e) => return Err((e, stream)),
+                    Err(e) => return Err((e.into(), stream)),
                 }
 
                 self.stream = Some(stream);
                 self.state = ReadMsg4;
-                return self.poll();
+                return self.poll(cx);
             }
 
             ReadMsg4 => {
                 while self.offset < MSG4_BYTES {
-                    match stream.read(&mut self.data[self.offset..MSG4_BYTES]) {
-                        Ok(read) => {
+                    match stream.poll_read(cx, &mut self.data[self.offset..MSG4_BYTES]) {
+                        Ok(Ready(read)) => {
                             if read == 0 {
-                                return Err((Error::new(UnexpectedEof, "failed to read msg4"),
+                                return Err((Error::new(UnexpectedEof, "failed to read msg4")
+                                                .into(),
                                             stream));
                             }
                             self.offset += read;
                         }
-                        Err(ref e) if e.kind() == WouldBlock => {
+                        Ok(Pending) => {
                             self.stream = Some(stream);
-                            return Ok(Async::NotReady);
+                            return Ok(Pending);
                         }
-                        Err(ref e) if e.kind() == Interrupted => {}
-                        Err(e) => return Err((e, stream)),
+                        Err(e) => return Err((e.into(), stream)),
                     }
                 }
 
@@ -304,26 +304,15 @@ impl<S: AsyncRead + AsyncWrite> Future for UnsafeClientHandshaker<S> {
                                          &*(&self.data as *const [u8; MSG3_BYTES] as
                                             *const [u8; MSG4_BYTES])
                                      }) {
-                    return Ok(Async::Ready((Err(ClientHandshakeFailure::InvalidMsg4), stream)));
+                    return Err((HandshakeError::CryptoError, stream));
                 }
 
                 let mut outcome = unsafe { uninitialized() };
                 self.client.outcome(&mut outcome);
-                return Ok(Async::Ready((Ok(outcome), stream)));
+                return Ok(Ready((outcome, stream)));
             }
-
         }
     }
-}
-
-/// Reason why a client might reject the server although the handshake itself
-/// was executed without IO errors.
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum ClientHandshakeFailure {
-    /// Received invalid msg2 from the server.
-    InvalidMsg2,
-    /// Received invalid msg4 from the server.
-    InvalidMsg4,
 }
 
 // State for the future state machine.
