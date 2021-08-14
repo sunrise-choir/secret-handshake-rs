@@ -3,9 +3,9 @@ name = "secret_handshake"
 version = "5.0.0"
 authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
 description = "Implementation of the secret-handshake protocol."
-repository = "https://github.com/AljoschaMeyer/secret-handshake-rs"
+repository = "https://github.com/sunrise-choir/secret-handshake-rs"
 readme = "README.md"
-license = "AGPL-3.0"
+license = "LGPL-3.0"
 
 [dependencies]
 sodiumoxide = "0.0.16"
